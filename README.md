@@ -14,7 +14,7 @@ Aplicativo desktop ultraleve para Windows que acompanha as horas efetivamente tr
 
 ### Controle de Ausências / Intervalos, Sessões e Registros Diários
 
-![Aba Ausências e Intervalos com justificativa inline e resumo por categoria](docs/images/ausencias-intervalos-v2.png)
+![Aba Ausências e Intervalos com justificativa inline e resumo por categoria](docs/images/ausencias-intervalos-v3.png)
 
 ![Aba Sessões de Hoje com histórico de bloqueios de tela](docs/images/historico-sessoes-v2.png)
 
