@@ -1,0 +1,17 @@
+# Arquivos temporarios de build e testes
+*.tmp
+*.user
+*.suo
+*.log
+dist/TrackerTests.exe
+dist/_check_build.exe
+
+# IDEs
+.vs/
+.vscode/
+.idea/
+
+# Registros pessoais caso sejam copiados localmente
+*.csv
+config.ini
+estado_alertas.ini

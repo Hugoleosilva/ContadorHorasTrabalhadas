@@ -1,0 +1,552 @@
+using System;
+using System.Diagnostics;
+using System.Drawing;
+using System.Media;
+using System.Windows.Forms;
+using Microsoft.Win32;
+
+namespace RelogioAcompanhamento
+{
+    public class TrayApplicationContext : ApplicationContext
+    {
+        private readonly bool _demoMode;
+        private readonly CsvStorage _storage;
+        private readonly AppConfig _config;
+        private readonly TimeTracker _tracker;
+        private readonly AlertManager _alerts;
+        private readonly FloatingWidgetForm _widget;
+        private readonly NotifyIcon _trayIcon;
+        private readonly Timer _tickTimer;
+
+        private HistoryForm _historyForm;
+        private ToolStripMenuItem _menuShowHide;
+        private ToolStripMenuItem _menuPauseResume;
+        private ToolStripMenuItem _menuAutoStartCounting;
+        private ToolStripMenuItem _menuAlwaysOnTop;
+        private ToolStripMenuItem _menuShowInTaskbar;
+        private ToolStripMenuItem _menuStartWithWindows;
+
+        private Icon _currentTrayIcon;
+        private string _lastIconKey;
+        private bool _exiting;
+
+        public TrayApplicationContext(bool demoMode)
+        {
+            _demoMode = demoMode;
+            _storage = new CsvStorage(CsvStorage.GetDefaultDataDirectory(demoMode));
+            _config = _storage.LoadConfig();
+
+            int regularSec = demoMode ? 60 : _config.RegularLimitMinutes * 60;
+            int overtimeSec = demoMode ? 30 : _config.OvertimeLimitMinutes * 60;
+            int preAlertSec = demoMode ? 15 : _config.PreAlertMinutes * 60;
+
+            _tracker = new TimeTracker(_storage, regularSec, overtimeSec, null, 30);
+            _tracker.Initialize(_config.AutoStartCounting);
+
+            _alerts = new AlertManager(_storage, regularSec, overtimeSec, preAlertSec);
+
+            ContextMenuStrip menu = BuildContextMenu();
+
+            _widget = new FloatingWidgetForm(_config, menu, demoMode);
+            _widget.PauseToggleRequested += delegate { TogglePause(); };
+            _widget.HistoryRequested += delegate { OpenHistory(); };
+            _widget.HideRequested += delegate { SetWidgetVisibility(false); };
+            _widget.GlobalToggleRequested += delegate { ToggleWidgetVisibility(); };
+            _widget.ShowExistingRequested += delegate { ShowAndFocusWidget(); };
+            _widget.GeometryChanged += delegate { SaveWidgetGeometry(); };
+
+            _trayIcon = new NotifyIcon();
+            _trayIcon.ContextMenuStrip = menu;
+            _trayIcon.Visible = true;
+            _trayIcon.MouseClick += OnTrayMouseClick;
+
+            SystemEvents.SessionSwitch += OnSessionSwitch;
+            SystemEvents.PowerModeChanged += OnPowerModeChanged;
+            SystemEvents.SessionEnding += OnSessionEnding;
+
+            _tickTimer = new Timer();
+            _tickTimer.Interval = 1000;
+            _tickTimer.Tick += OnTick;
+            _tickTimer.Start();
+
+            UpdateUiAndAlerts();
+
+            if (_config.WidgetVisible)
+            {
+                _widget.Show();
+            }
+            else if (_config.ShowInTaskbar)
+            {
+                _widget.WindowState = FormWindowState.Minimized;
+                _widget.Show();
+            }
+        }
+
+        private ContextMenuStrip BuildContextMenu()
+        {
+            ContextMenuStrip menu = new ContextMenuStrip();
+
+            _menuShowHide = new ToolStripMenuItem("Ocultar Relógio (Ctrl+Alt+R)");
+            _menuShowHide.Click += delegate { ToggleWidgetVisibility(); };
+            menu.Items.Add(_menuShowHide);
+
+            _menuPauseResume = new ToolStripMenuItem("Pausar Contagem");
+            _menuPauseResume.Click += delegate { TogglePause(); };
+            menu.Items.Add(_menuPauseResume);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem menuSize = new ToolStripMenuItem("Tamanho da Janela");
+            ToolStripMenuItem sizeCompact = new ToolStripMenuItem("Compacto (165 x 50)");
+            sizeCompact.Click += delegate { _widget.ApplyPresetSize(165, 50); };
+            ToolStripMenuItem sizeDefault = new ToolStripMenuItem("Padrão (240 x 74)");
+            sizeDefault.Click += delegate { _widget.ApplyPresetSize(240, 74); };
+            ToolStripMenuItem sizeLarge = new ToolStripMenuItem("Grande (290 x 96)");
+            sizeLarge.Click += delegate { _widget.ApplyPresetSize(290, 96); };
+            menuSize.DropDownItems.Add(sizeCompact);
+            menuSize.DropDownItems.Add(sizeDefault);
+            menuSize.DropDownItems.Add(sizeLarge);
+            menu.Items.Add(menuSize);
+
+            ToolStripMenuItem menuAnchor = new ToolStripMenuItem("Reancorar no Canto Inferior Direito");
+            menuAnchor.Click += delegate
+            {
+                _widget.AnchorBottomRight();
+                SetWidgetVisibility(true);
+            };
+            menu.Items.Add(menuAnchor);
+
+            _menuAlwaysOnTop = new ToolStripMenuItem("Sempre Visível no Topo");
+            _menuAlwaysOnTop.Checked = _config.AlwaysOnTop;
+            _menuAlwaysOnTop.Click += delegate
+            {
+                _config.AlwaysOnTop = !_config.AlwaysOnTop;
+                _widget.TopMost = _config.AlwaysOnTop;
+                _menuAlwaysOnTop.Checked = _config.AlwaysOnTop;
+                _storage.SaveConfig(_config);
+            };
+            menu.Items.Add(_menuAlwaysOnTop);
+
+            _menuShowInTaskbar = new ToolStripMenuItem("Manter na Barra de Tarefas");
+            _menuShowInTaskbar.Checked = _config.ShowInTaskbar;
+            _menuShowInTaskbar.Click += delegate
+            {
+                _config.ShowInTaskbar = !_config.ShowInTaskbar;
+                _widget.ShowInTaskbar = _config.ShowInTaskbar;
+                _menuShowInTaskbar.Checked = _config.ShowInTaskbar;
+                if (_config.ShowInTaskbar && !_widget.Visible)
+                {
+                    _widget.WindowState = FormWindowState.Minimized;
+                    _widget.Show();
+                }
+                else if (!_config.ShowInTaskbar && _widget.WindowState == FormWindowState.Minimized)
+                {
+                    _widget.Hide();
+                }
+                _storage.SaveConfig(_config);
+            };
+            menu.Items.Add(_menuShowInTaskbar);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem menuHistory = new ToolStripMenuItem("Ver Histórico e Registros...");
+            menuHistory.Click += delegate { OpenHistory(); };
+            menu.Items.Add(menuHistory);
+
+            ToolStripMenuItem menuFolder = new ToolStripMenuItem("Abrir Pasta dos Registros CSV");
+            menuFolder.Click += delegate
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo(_storage.BaseDirectory) { UseShellExecute = true });
+                }
+                catch { }
+            };
+            menu.Items.Add(menuFolder);
+
+            ToolStripMenuItem menuResetToday = new ToolStripMenuItem("Zerar Contagem de Hoje...");
+            menuResetToday.Click += delegate { ConfirmResetToday(); };
+            menu.Items.Add(menuResetToday);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            _menuAutoStartCounting = new ToolStripMenuItem("Iniciar Contagem ao Abrir");
+            _menuAutoStartCounting.Checked = _config.AutoStartCounting;
+            _menuAutoStartCounting.Click += delegate
+            {
+                _config.AutoStartCounting = !_config.AutoStartCounting;
+                _menuAutoStartCounting.Checked = _config.AutoStartCounting;
+                _storage.SaveConfig(_config);
+            };
+            menu.Items.Add(_menuAutoStartCounting);
+
+            _menuStartWithWindows = new ToolStripMenuItem("Iniciar com o Windows");
+            _menuStartWithWindows.Checked = StartupManager.IsEnabled();
+            _menuStartWithWindows.Click += delegate
+            {
+                bool target = !_menuStartWithWindows.Checked;
+                if (StartupManager.SetEnabled(target))
+                {
+                    _menuStartWithWindows.Checked = target;
+                    _config.StartWithWindows = target;
+                    _storage.SaveConfig(_config);
+                }
+            };
+            menu.Items.Add(_menuStartWithWindows);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem menuExit = new ToolStripMenuItem("Sair");
+            menuExit.Click += delegate { ExitApplication("Encerrado"); };
+            menu.Items.Add(menuExit);
+
+            return menu;
+        }
+
+        private void OnTrayMouseClick(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                ToggleWidgetVisibility();
+            }
+        }
+
+        private void OnTick(object sender, EventArgs e)
+        {
+            if (_exiting) return;
+            _tracker.Tick();
+            UpdateUiAndAlerts();
+        }
+
+        private void OnSessionSwitch(object sender, SessionSwitchEventArgs e)
+        {
+            RunOnUiThread(delegate
+            {
+                if (_exiting) return;
+
+                switch (e.Reason)
+                {
+                    case SessionSwitchReason.SessionLock:
+                        _tracker.PauseBySession("BloqueioTela");
+                        break;
+                    case SessionSwitchReason.SessionLogoff:
+                    case SessionSwitchReason.ConsoleDisconnect:
+                    case SessionSwitchReason.RemoteDisconnect:
+                        _tracker.PauseBySession("Logoff");
+                        break;
+                    case SessionSwitchReason.SessionUnlock:
+                    case SessionSwitchReason.SessionLogon:
+                    case SessionSwitchReason.ConsoleConnect:
+                    case SessionSwitchReason.RemoteConnect:
+                        _tracker.ResumeFromSession();
+                        break;
+                }
+
+                UpdateUiAndAlerts();
+            });
+        }
+
+        private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
+        {
+            RunOnUiThread(delegate
+            {
+                if (_exiting) return;
+
+                if (e.Mode == PowerModes.Suspend)
+                {
+                    _tracker.PauseBySession("Suspensao");
+                }
+                else if (e.Mode == PowerModes.Resume)
+                {
+                    _tracker.ResumeFromSession();
+                }
+
+                UpdateUiAndAlerts();
+            });
+        }
+
+        private void OnSessionEnding(object sender, SessionEndingEventArgs e)
+        {
+            if (_widget != null && !_widget.IsDisposed && _widget.IsHandleCreated && _widget.InvokeRequired)
+            {
+                try
+                {
+                    _widget.Invoke((Action)delegate { ExitApplication("Desligamento"); });
+                }
+                catch
+                {
+                    ExitApplication("Desligamento");
+                }
+            }
+            else
+            {
+                ExitApplication("Desligamento");
+            }
+        }
+
+        private void RunOnUiThread(Action action)
+        {
+            if (_widget != null && !_widget.IsDisposed && _widget.IsHandleCreated && _widget.InvokeRequired)
+            {
+                try
+                {
+                    _widget.BeginInvoke(action);
+                }
+                catch { }
+            }
+            else
+            {
+                action();
+            }
+        }
+
+        private void TogglePause()
+        {
+            _tracker.ToggleManualPause();
+            UpdateUiAndAlerts();
+        }
+
+        private void ConfirmResetToday()
+        {
+            DialogResult res = MessageBox.Show(
+                "Deseja zerar a contagem e remover os registros de hoje (" + _tracker.CurrentDate + ")?",
+                "Relógio Acompanhamento",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (res == DialogResult.Yes)
+            {
+                _tracker.ResetToday();
+                _alerts.ResetCache();
+                UpdateUiAndAlerts();
+            }
+        }
+
+        private bool IsWidgetShown()
+        {
+            return _widget.Visible && _widget.WindowState != FormWindowState.Minimized;
+        }
+
+        private void ToggleWidgetVisibility()
+        {
+            SetWidgetVisibility(!IsWidgetShown());
+        }
+
+        private void ShowAndFocusWidget()
+        {
+            SetWidgetVisibility(true);
+            _widget.BringToFront();
+            _widget.Activate();
+        }
+
+        private void SetWidgetVisibility(bool visible)
+        {
+            if (visible)
+            {
+                if (!_widget.Visible)
+                {
+                    _widget.Show();
+                }
+                if (_widget.WindowState == FormWindowState.Minimized)
+                {
+                    _widget.WindowState = FormWindowState.Normal;
+                }
+                _widget.BringToFront();
+                _widget.Activate();
+            }
+            else
+            {
+                if (_config.ShowInTaskbar)
+                {
+                    if (!_widget.Visible)
+                    {
+                        _widget.Show();
+                    }
+                    _widget.WindowState = FormWindowState.Minimized;
+                }
+                else if (_widget.Visible)
+                {
+                    _widget.Hide();
+                }
+            }
+
+            _config.WidgetVisible = visible;
+            _storage.SaveConfig(_config);
+            UpdateMenuLabels();
+        }
+
+        private void SaveWidgetGeometry()
+        {
+            if (_widget.WindowState != FormWindowState.Normal) return;
+            _config.WidgetWidth = _widget.Width;
+            _config.WidgetHeight = _widget.Height;
+            _config.WidgetX = _widget.Left;
+            _config.WidgetY = _widget.Top;
+            _storage.SaveConfig(_config);
+        }
+
+        private void OpenHistory()
+        {
+            if (_historyForm == null || _historyForm.IsDisposed)
+            {
+                _historyForm = new HistoryForm(_tracker, _storage);
+                if (_currentTrayIcon != null)
+                {
+                    _historyForm.Icon = _currentTrayIcon;
+                }
+            }
+            _historyForm.RefreshData();
+            if (!_historyForm.Visible)
+            {
+                _historyForm.Show();
+            }
+            _historyForm.BringToFront();
+            _historyForm.Activate();
+        }
+
+        private void UpdateUiAndAlerts()
+        {
+            int totalSec = _tracker.GetTodayTotalSeconds();
+            AlertLevel level = _alerts.GetAlertLevel(totalSec);
+
+            _widget.UpdateDisplay(
+                totalSec,
+                _tracker.RegularLimitSeconds,
+                _tracker.OvertimeLimitSeconds,
+                _tracker.State,
+                level);
+
+            if (_tracker.State == TrackerState.Working)
+            {
+                AlertNotification alert = _alerts.Evaluate(_tracker.CurrentDate, totalSec);
+                if (alert != null)
+                {
+                    ShowAlert(alert);
+                }
+            }
+
+            UpdateTrayStatus(totalSec, level);
+            UpdateMenuLabels();
+
+            if (_historyForm != null && !_historyForm.IsDisposed && _historyForm.Visible)
+            {
+                _historyForm.RefreshData();
+            }
+        }
+
+        private void ShowAlert(AlertNotification alert)
+        {
+            // Se o widget estiver oculto e atingir 8h ou 10h, exibe notificação na bandeja
+            ToolTipIcon icon = alert.IsCritical ? ToolTipIcon.Error : ToolTipIcon.Warning;
+            _trayIcon.ShowBalloonTip(8000, alert.Title, alert.Message, icon);
+
+            if (alert.IsCritical)
+            {
+                try { SystemSounds.Exclamation.Play(); } catch { }
+            }
+        }
+
+        private void UpdateTrayStatus(int totalSec, AlertLevel level)
+        {
+            string stateLabel;
+            if (_tracker.State == TrackerState.PausedManual) stateLabel = "Pausado";
+            else if (_tracker.State == TrackerState.PausedSession) stateLabel = "Congelado";
+            else if (level == AlertLevel.LimitReached) stateLabel = "LIMITE 10h";
+            else if (level == AlertLevel.Overtime || level == AlertLevel.PreOvertimeLimit) stateLabel = "Hora Extra";
+            else stateLabel = "Ativo";
+
+            string tip = string.Format("Relógio: {0} ({1})", TimeFormat.FormatHms(totalSec), stateLabel);
+            if (_demoMode)
+            {
+                tip = "[DEMO] " + tip;
+            }
+            if (tip.Length > 63)
+            {
+                tip = tip.Substring(0, 63);
+            }
+            _trayIcon.Text = tip;
+
+            bool isPaused = _tracker.State != TrackerState.Working;
+            string iconKey = isPaused ? "paused" : level.ToString();
+            if (iconKey != _lastIconKey)
+            {
+                _lastIconKey = iconKey;
+                Color c = GetIconColor(isPaused, level);
+                Icon nextIcon = IconFactory.CreateClockIcon(c, isPaused);
+                Icon oldIcon = _currentTrayIcon;
+                _currentTrayIcon = nextIcon;
+                _trayIcon.Icon = nextIcon;
+                _widget.Icon = nextIcon;
+                if (oldIcon != null)
+                {
+                    oldIcon.Dispose();
+                }
+            }
+        }
+
+        private static Color GetIconColor(bool isPaused, AlertLevel level)
+        {
+            if (isPaused) return Color.FromArgb(148, 163, 184);
+            switch (level)
+            {
+                case AlertLevel.PreRegular: return Color.FromArgb(234, 179, 8);
+                case AlertLevel.Overtime: return Color.FromArgb(249, 115, 22);
+                case AlertLevel.PreOvertimeLimit: return Color.FromArgb(234, 88, 12);
+                case AlertLevel.LimitReached: return Color.FromArgb(239, 68, 68);
+                default: return Color.FromArgb(34, 197, 94);
+            }
+        }
+
+        private void UpdateMenuLabels()
+        {
+            _menuShowHide.Text = IsWidgetShown()
+                ? "Minimizar / Ocultar Relógio (Ctrl+Alt+R)"
+                : "Mostrar Relógio (Ctrl+Alt+R)";
+
+            _menuPauseResume.Text = _tracker.State == TrackerState.Working
+                ? "Pausar Contagem"
+                : "Retomar Contagem";
+        }
+
+        private void ExitApplication(string reason)
+        {
+            if (_exiting) return;
+            _exiting = true;
+
+            _tickTimer.Stop();
+            SystemEvents.SessionSwitch -= OnSessionSwitch;
+            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            SystemEvents.SessionEnding -= OnSessionEnding;
+
+            _tracker.Shutdown(reason);
+            SaveWidgetGeometry();
+
+            _trayIcon.Visible = false;
+            if (_historyForm != null && !_historyForm.IsDisposed)
+            {
+                _historyForm.Close();
+                _historyForm.Dispose();
+            }
+            if (_widget != null && !_widget.IsDisposed)
+            {
+                _widget.Dispose();
+            }
+            ExitThread();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _tickTimer.Dispose();
+                _trayIcon.Dispose();
+                if (_currentTrayIcon != null)
+                {
+                    _currentTrayIcon.Dispose();
+                    _currentTrayIcon = null;
+                }
+            }
+            base.Dispose(disposing);
+        }
+    }
+}
