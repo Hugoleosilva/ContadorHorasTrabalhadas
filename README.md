@@ -12,11 +12,13 @@ Aplicativo desktop ultraleve para Windows que acompanha as horas efetivamente tr
 | :---: | :---: |
 | ![Submenu Jornada de Trabalho](docs/images/menu-jornada.png) | ![Submenu Pausar como Ausência](docs/images/menu-ausencia.png) |
 
-### Controle de Ausências / Intervalos e Histórico do Dia
+### Controle de Ausências / Intervalos, Sessões e Registros Diários
 
-![Aba Ausências e Intervalos com resumo por categoria](docs/images/ausencias-intervalos.png)
+![Aba Ausências e Intervalos com justificativa inline e resumo por categoria](docs/images/ausencias-intervalos-v2.png)
 
-![Janela de Registros e Histórico com sessões de bloqueio de tela](docs/images/historico-sessoes.png)
+![Aba Sessões de Hoje com histórico de bloqueios de tela](docs/images/historico-sessoes-v2.png)
+
+![Aba Registros Diários consolidados em CSV com total de ausências](docs/images/registros-diarios.png)
 
 ## Recursos
 
