@@ -6,7 +6,7 @@ Aplicativo desktop ultraleve para Windows que acompanha as horas efetivamente tr
 
 | Mini-widget no canto inferior direito + Barra de Tarefas | Menu de controle rápido (clique direito) |
 | :---: | :---: |
-| ![Mini-widget flutuante e ícone na barra de tarefas](docs/images/widget-barra-tarefas.png) | ![Menu de contexto atualizado com opções rápidas](docs/images/menu-contexto.png) |
+| ![Mini-widget flutuante e ícone na barra de tarefas](docs/images/widget-barra-tarefas.png) | ![Menu de contexto atualizado com opções rápidas](docs/images/menu-contexto-v2.png) |
 
 | Perfis de Jornada (8h +2h extras / Estagiário 6h) | Pausa rápida por tipo de ausência |
 | :---: | :---: |
