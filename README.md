@@ -6,9 +6,16 @@ Aplicativo desktop ultraleve para Windows que acompanha as horas efetivamente tr
 
 | Mini-widget no canto inferior direito + Barra de Tarefas | Menu de controle rápido (clique direito) |
 | :---: | :---: |
-| ![Mini-widget flutuante e ícone na barra de tarefas](docs/images/widget-barra-tarefas.png) | ![Menu de contexto com opções rápidas](docs/images/menu-contexto.png) |
+| ![Mini-widget flutuante e ícone na barra de tarefas](docs/images/widget-barra-tarefas.png) | ![Menu de contexto atualizado com opções rápidas](docs/images/menu-contexto.png) |
 
-### Registros e Histórico do Dia
+| Perfis de Jornada (8h +2h extras / Estagiário 6h) | Pausa rápida por tipo de ausência |
+| :---: | :---: |
+| ![Submenu Jornada de Trabalho](docs/images/menu-jornada.png) | ![Submenu Pausar como Ausência](docs/images/menu-ausencia.png) |
+
+### Controle de Ausências / Intervalos e Histórico do Dia
+
+![Aba Ausências e Intervalos com resumo por categoria](docs/images/ausencias-intervalos.png)
+
 ![Janela de Registros e Histórico com sessões de bloqueio de tela](docs/images/historico-sessoes.png)
 
 ## Recursos
