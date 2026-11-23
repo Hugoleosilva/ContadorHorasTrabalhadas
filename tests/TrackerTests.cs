@@ -19,6 +19,9 @@ namespace RelogioAcompanhamento.Tests
             Run("RecuperacaoAposQuedaHeartbeat", TestCrashRecoveryFromHeartbeat);
             Run("PersistenciaConfigCsv", TestConfigPersistence);
             Run("IniciarPausadoEZerarHoje", TestStartPausedAndResetToday);
+            Run("AusenciasIntervaloMedicoBloqueio", TestAbsencesTrackingAndManualLaunch);
+            Run("ModoReuniaoIgnoraBloqueioDeTela", TestMeetingModeIgnoresScreenLock);
+            Run("PerfilEstagiario6hSemExtras", TestIntern6hProfileNoOvertime);
 
             Console.WriteLine();
             Console.WriteLine(string.Format("Resultado: {0} passou(ram), {1} falhou(aram).", _passed, _failed));
@@ -78,25 +81,27 @@ namespace RelogioAcompanhamento.Tests
                 TimeTracker tracker = new TimeTracker(storage, 8 * 3600, 2 * 3600, delegate { return now; }, 30);
 
                 tracker.Initialize();
-                now = now.AddMinutes(30); // 09:30 -> 1800s trabalhados
+                now = now.AddMinutes(30);
                 AssertEqual(1800, tracker.GetTodayTotalSeconds(), "Deve contar 30 min antes do bloqueio");
 
                 tracker.PauseBySession("BloqueioTela");
                 AssertEqual(TrackerState.PausedSession, tracker.State, "Estado deve ser PausedSession");
 
-                now = now.AddMinutes(45); // 45 min bloqueado (nao deve contar!)
-                AssertEqual(1800, tracker.GetTodayTotalSeconds(), "Tempo bloqueado nao pode ser somado");
+                now = now.AddMinutes(45);
+                AssertEqual(1800, tracker.GetTodayTotalSeconds(), "Tempo bloqueado nao pode ser somado nas horas trabalhadas");
 
                 tracker.ResumeFromSession();
                 AssertEqual(TrackerState.Working, tracker.State, "Deve retomar apos desbloqueio");
+                AssertEqual(2700, tracker.GetTodayAbsenceSeconds(), "45 min de bloqueio devem ser contabilizados como ausencia");
 
-                now = now.AddMinutes(20); // +20 min trabalhados -> 50 min = 3000s
+                now = now.AddMinutes(20);
                 AssertEqual(3000, tracker.GetTodayTotalSeconds(), "Deve somar apenas tempo ativo (30 + 20 = 50 min)");
 
                 tracker.Shutdown("Encerrado");
                 List<DailyRecord> daily = storage.LoadDailyRecords();
                 AssertEqual(1, daily.Count, "Deve gerar 1 registro diario no CSV");
                 AssertEqual(3000, daily[0].TotalSeconds, "Total no CSV deve ser 3000s");
+                AssertEqual(2700, daily[0].TotalAbsenceSeconds, "Ausencias no CSV devem ser 2700s");
             }
             finally
             {
@@ -115,16 +120,16 @@ namespace RelogioAcompanhamento.Tests
 
                 tracker.Initialize();
                 now = now.AddMinutes(10);
-                tracker.PauseManual();
+                tracker.PauseManual(AbsenceTypes.Intervalo, "Almoço");
                 AssertEqual(TrackerState.PausedManual, tracker.State, "Estado deve ser PausedManual");
 
-                // Bloqueio e desbloqueio do Windows enquanto estava em pausa manual
                 tracker.PauseBySession("BloqueioTela");
                 now = now.AddMinutes(30);
                 tracker.ResumeFromSession();
 
                 AssertEqual(TrackerState.PausedManual, tracker.State, "Desbloqueio nao deve cancelar pausa manual");
                 AssertEqual(600, tracker.GetTodayTotalSeconds(), "Tempo nao deve avançar durante pausa manual");
+                AssertEqual(AbsenceTypes.Intervalo, tracker.ActiveAbsenceType, "Tipo de ausencia deve continuar Intervalo");
 
                 tracker.ResumeManual();
                 AssertEqual(TrackerState.Working, tracker.State, "Retomada manual deve voltar a contar");
@@ -155,7 +160,6 @@ namespace RelogioAcompanhamento.Tests
                 AssertTrue(n2 != null && n2.Level == AlertLevel.Overtime, "8h00 deve disparar Overtime");
                 AssertTrue(alerts.Evaluate(date, 8 * 3600 + 120) == null, "Overtime nao deve repetir");
 
-                // Simula reinicio do app recarregando flags do disco
                 AlertManager alertsReloaded = new AlertManager(storage, 8 * 3600, 2 * 3600, 15 * 60);
                 AssertTrue(alertsReloaded.Evaluate(date, 8 * 3600 + 300) == null, "Overtime nao deve repetir apos reinicio");
 
@@ -211,9 +215,8 @@ namespace RelogioAcompanhamento.Tests
 
                 tracker1.Initialize();
                 now = now.AddMinutes(15);
-                tracker1.Tick(); // dispara heartbeat e grava sessao "Ativo" com 900s
+                tracker1.Tick();
 
-                // Simula queda de energia (sem chamar Shutdown) e reabertura 10 min depois
                 now = now.AddMinutes(10);
                 TimeTracker tracker2 = new TimeTracker(storage, 8 * 3600, 2 * 3600, delegate { return now; }, 30);
                 tracker2.Initialize();
@@ -235,6 +238,7 @@ namespace RelogioAcompanhamento.Tests
             {
                 CsvStorage storage = new CsvStorage(dir);
                 AppConfig cfg = new AppConfig();
+                cfg.ApplyProfile(WorkProfile.Estagiario6h);
                 cfg.WidgetWidth = 280;
                 cfg.WidgetHeight = 90;
                 cfg.WidgetX = 1200;
@@ -244,6 +248,9 @@ namespace RelogioAcompanhamento.Tests
                 storage.SaveConfig(cfg);
 
                 AppConfig loaded = storage.LoadConfig();
+                AssertEqual(WorkProfile.Estagiario6h, loaded.Profile, "Perfil Estagiario6h deve persistir");
+                AssertEqual(360, loaded.RegularLimitMinutes, "Estagiario deve ter 360 min regulares");
+                AssertEqual(0, loaded.OvertimeLimitMinutes, "Estagiario deve ter 0 min extras");
                 AssertEqual(280, loaded.WidgetWidth, "Largura deve persistir");
                 AssertEqual(90, loaded.WidgetHeight, "Altura deve persistir");
                 AssertEqual(1200, loaded.WidgetX, "Posicao X deve persistir");
@@ -271,6 +278,7 @@ namespace RelogioAcompanhamento.Tests
 
                 now = now.AddMinutes(10);
                 AssertEqual(0, tracker.GetTodayTotalSeconds(), "Nao deve contar enquanto inicia pausado");
+                AssertEqual(0, tracker.GetTodayAbsenceSeconds(), "Inicio pausado nao deve gerar ausencia falsa");
 
                 tracker.ResumeManual();
                 now = now.AddMinutes(5);
@@ -278,7 +286,117 @@ namespace RelogioAcompanhamento.Tests
 
                 tracker.ResetToday();
                 AssertEqual(0, tracker.GetTodayTotalSeconds(), "ResetToday deve zerar o contador do dia");
+                AssertEqual(0, tracker.GetTodayAbsenceSeconds(), "ResetToday deve zerar ausencias do dia");
                 AssertEqual(1, tracker.GetTodaySessionsSnapshot().Count, "Se estava ativo, inicia nova sessao zerada");
+            }
+            finally
+            {
+                CleanupDir(dir);
+            }
+        }
+
+        private static void TestAbsencesTrackingAndManualLaunch()
+        {
+            string dir = CreateTempDir();
+            try
+            {
+                DateTime now = new DateTime(2026, 11, 23, 8, 0, 0);
+                CsvStorage storage = new CsvStorage(dir);
+                TimeTracker tracker = new TimeTracker(storage, 8 * 3600, 2 * 3600, delegate { return now; }, 30);
+
+                tracker.Initialize();
+                now = now.AddHours(2); // 10:00 (2h trabalhadas)
+
+                // Pausa rapida de 15 min
+                tracker.PauseManual(AbsenceTypes.PausaRapida, "Cafe");
+                now = now.AddMinutes(15);
+                tracker.ResumeManual();
+
+                // Lancamento manual de Intervalo 1h + Ida ao Medico 1h30 (nao altera horas trabalhadas)
+                tracker.AddManualAbsence(
+                    new DateTime(2026, 11, 23, 12, 0, 0),
+                    new DateTime(2026, 11, 23, 13, 0, 0),
+                    AbsenceTypes.Intervalo,
+                    "Almoco");
+
+                tracker.AddManualAbsence(
+                    new DateTime(2026, 11, 23, 14, 0, 0),
+                    new DateTime(2026, 11, 23, 15, 30, 0),
+                    AbsenceTypes.Medico,
+                    "Consulta");
+
+                AssertEqual(7200, tracker.GetTodayTotalSeconds(), "Ausencias nao devem alterar horas trabalhadas (2h)");
+                AbsenceSummary sum = tracker.GetTodayAbsenceSummary();
+                AssertEqual(900, sum.PausaRapidaSeconds, "Pausa rapida deve somar 15 min");
+                AssertEqual(3600, sum.IntervaloSeconds, "Intervalo deve somar 1h");
+                AssertEqual(5400, sum.MedicoSeconds, "Medico deve somar 1h30");
+                AssertEqual(9900, sum.TotalSeconds, "Total de ausencias deve somar 2h45 (9900s)");
+
+                // Reclassificar e excluir
+                AssertTrue(tracker.UpdateAbsence(0, AbsenceTypes.Outro, "Reclassificado"), "UpdateAbsence deve funcionar");
+                AssertTrue(tracker.DeleteAbsence(0), "DeleteAbsence deve funcionar");
+                AssertEqual(9000, tracker.GetTodayAbsenceSeconds(), "Apos excluir 15 min deve restar 2h30 (9000s)");
+            }
+            finally
+            {
+                CleanupDir(dir);
+            }
+        }
+
+        private static void TestMeetingModeIgnoresScreenLock()
+        {
+            string dir = CreateTempDir();
+            try
+            {
+                DateTime now = new DateTime(2026, 11, 23, 10, 0, 0);
+                CsvStorage storage = new CsvStorage(dir);
+                TimeTracker tracker = new TimeTracker(storage, 8 * 3600, 2 * 3600, delegate { return now; }, 30);
+
+                tracker.Initialize();
+                tracker.SetMeetingMode(true);
+                AssertTrue(tracker.InMeetingMode, "Modo reuniao deve estar ativo");
+
+                now = now.AddMinutes(10);
+                tracker.PauseBySession("BloqueioTela"); // Usuario bloqueou PC para ir a sala de reuniao
+                AssertEqual(TrackerState.Working, tracker.State, "Em modo reuniao, bloqueio de tela NAO deve pausar");
+
+                now = now.AddMinutes(40); // 40 min na sala de reuniao com tela bloqueada
+                tracker.ResumeFromSession();
+
+                AssertEqual(3000, tracker.GetTodayTotalSeconds(), "Tempo inteiro em reuniao (50 min) deve contar como trabalhado");
+                AssertEqual(0, tracker.GetTodayAbsenceSeconds(), "Bloqueio em reuniao NAO deve gerar ausencia");
+            }
+            finally
+            {
+                CleanupDir(dir);
+            }
+        }
+
+        private static void TestIntern6hProfileNoOvertime()
+        {
+            string dir = CreateTempDir();
+            try
+            {
+                DateTime now = new DateTime(2026, 11, 23, 8, 0, 0);
+                CsvStorage storage = new CsvStorage(dir);
+                TimeTracker tracker = new TimeTracker(storage, 6 * 3600, 0, delegate { return now; }, 30);
+                AlertManager alerts = new AlertManager(storage, 6 * 3600, 0, 15 * 60);
+
+                tracker.Initialize();
+                now = now.AddHours(5).AddMinutes(45);
+                AssertEqual(AlertLevel.PreRegular, alerts.GetAlertLevel(tracker.GetTodayTotalSeconds()), "5h45 deve ser PreRegular");
+                AlertNotification pre = alerts.Evaluate(tracker.CurrentDate, tracker.GetTodayTotalSeconds());
+                AssertTrue(pre != null && pre.Level == AlertLevel.PreRegular, "5h45 deve disparar pre-aviso de 6h");
+
+                now = now.AddMinutes(15); // 6h00 exatas
+                AssertEqual(AlertLevel.LimitReached, alerts.GetAlertLevel(tracker.GetTodayTotalSeconds()), "6h00 para estagiario deve ser LimitReached (sem extras)");
+                AlertNotification lim = alerts.Evaluate(tracker.CurrentDate, tracker.GetTodayTotalSeconds());
+                AssertTrue(lim != null && lim.IsCritical && lim.Level == AlertLevel.LimitReached, "6h00 deve disparar alerta critico de limite");
+
+                now = now.AddMinutes(10); // 6h10
+                AssertEqual(0, tracker.GetTodayOvertimeSeconds(), "Estagiario nunca acumula horas extras");
+                DailyRecord rec = tracker.BuildDailyRecord(now);
+                AssertEqual("Limite 6h Atingido", rec.StatusLabel, "Status diario deve indicar Limite 6h Atingido");
             }
             finally
             {

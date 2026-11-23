@@ -9,8 +9,9 @@ namespace RelogioAcompanhamento
     public class CsvStorage
     {
         private static readonly UTF8Encoding Utf8Bom = new UTF8Encoding(true);
-        private const string DailyHeader = "Data;PrimeiroInicio;UltimoRegistro;TotalTrabalhado;HorasNormais;HorasExtras;TotalSegundos;StatusLimite";
+        private const string DailyHeader = "Data;PrimeiroInicio;UltimoRegistro;TotalTrabalhado;HorasNormais;HorasExtras;TotalSegundos;StatusLimite;TotalAusencias";
         private const string SessionsHeader = "Data;Inicio;Fim;DuracaoSegundos;Motivo";
+        private const string AbsencesHeader = "Data;Inicio;Fim;DuracaoSegundos;Tipo;Observacao";
 
         public string BaseDirectory { get; private set; }
 
@@ -60,6 +61,12 @@ namespace RelogioAcompanhamento
             return Path.Combine(BaseDirectory, string.Format("sessoes_{0}.csv", yearMonth));
         }
 
+        public string GetAbsencesFilePath(string workDate)
+        {
+            string yearMonth = workDate.Length >= 7 ? workDate.Substring(0, 7) : DateTime.Now.ToString("yyyy-MM");
+            return Path.Combine(BaseDirectory, string.Format("ausencias_{0}.csv", yearMonth));
+        }
+
         public AppConfig LoadConfig()
         {
             AppConfig config = new AppConfig();
@@ -72,6 +79,8 @@ namespace RelogioAcompanhamento
             try
             {
                 string[] lines = File.ReadAllLines(path, Encoding.UTF8);
+                bool profileExplicit = false;
+
                 foreach (string rawLine in lines)
                 {
                     string line = rawLine.Trim();
@@ -90,7 +99,20 @@ namespace RelogioAcompanhamento
                     bool boolVal;
                     int intVal;
 
-                    if (key == "StartWithWindows" && bool.TryParse(val, out boolVal)) config.StartWithWindows = boolVal;
+                    if (key == "WorkProfile")
+                    {
+                        if (string.Equals(val, "Estagiario6h", StringComparison.OrdinalIgnoreCase))
+                        {
+                            config.ApplyProfile(WorkProfile.Estagiario6h);
+                            profileExplicit = true;
+                        }
+                        else if (string.Equals(val, "Clt8h", StringComparison.OrdinalIgnoreCase))
+                        {
+                            config.ApplyProfile(WorkProfile.Clt8h);
+                            profileExplicit = true;
+                        }
+                    }
+                    else if (key == "StartWithWindows" && bool.TryParse(val, out boolVal)) config.StartWithWindows = boolVal;
                     else if (key == "AutoStartCounting" && bool.TryParse(val, out boolVal)) config.AutoStartCounting = boolVal;
                     else if (key == "WidgetVisible" && bool.TryParse(val, out boolVal)) config.WidgetVisible = boolVal;
                     else if (key == "AlwaysOnTop" && bool.TryParse(val, out boolVal)) config.AlwaysOnTop = boolVal;
@@ -99,8 +121,8 @@ namespace RelogioAcompanhamento
                     else if (key == "WidgetHeight" && int.TryParse(val, out intVal)) config.WidgetHeight = Clamp(intVal, 46, 140);
                     else if (key == "WidgetX" && int.TryParse(val, out intVal)) config.WidgetX = intVal;
                     else if (key == "WidgetY" && int.TryParse(val, out intVal)) config.WidgetY = intVal;
-                    else if (key == "RegularLimitMinutes" && int.TryParse(val, out intVal) && intVal > 0) config.RegularLimitMinutes = intVal;
-                    else if (key == "OvertimeLimitMinutes" && int.TryParse(val, out intVal) && intVal >= 0) config.OvertimeLimitMinutes = intVal;
+                    else if (!profileExplicit && key == "RegularLimitMinutes" && int.TryParse(val, out intVal) && intVal > 0) config.RegularLimitMinutes = intVal;
+                    else if (!profileExplicit && key == "OvertimeLimitMinutes" && int.TryParse(val, out intVal) && intVal >= 0) config.OvertimeLimitMinutes = intVal;
                     else if (key == "PreAlertMinutes" && int.TryParse(val, out intVal) && intVal >= 0) config.PreAlertMinutes = intVal;
                 }
             }
@@ -117,6 +139,7 @@ namespace RelogioAcompanhamento
             EnsureDirectory();
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("# Configuracoes do Relogio Acompanhamento");
+            sb.AppendLine("WorkProfile=" + config.Profile.ToString());
             sb.AppendLine("StartWithWindows=" + config.StartWithWindows.ToString());
             sb.AppendLine("AutoStartCounting=" + config.AutoStartCounting.ToString());
             sb.AppendLine("WidgetVisible=" + config.WidgetVisible.ToString());
@@ -252,6 +275,70 @@ namespace RelogioAcompanhamento
             WriteAllTextAtomic(path, sb.ToString(), Utf8Bom);
         }
 
+        public List<AbsenceRecord> LoadAbsencesForDate(string workDate)
+        {
+            List<AbsenceRecord> result = new List<AbsenceRecord>();
+            string path = GetAbsencesFilePath(workDate);
+            if (!File.Exists(path))
+            {
+                return result;
+            }
+
+            List<AbsenceRecord> all = ReadAbsencesFile(path);
+            foreach (AbsenceRecord a in all)
+            {
+                if (a.WorkDate == workDate)
+                {
+                    result.Add(a);
+                }
+            }
+            return result;
+        }
+
+        public void SaveAbsencesForDate(string workDate, List<AbsenceRecord> absencesForDate)
+        {
+            EnsureDirectory();
+            string path = GetAbsencesFilePath(workDate);
+            List<AbsenceRecord> existing = File.Exists(path) ? ReadAbsencesFile(path) : new List<AbsenceRecord>();
+            List<AbsenceRecord> merged = new List<AbsenceRecord>();
+
+            foreach (AbsenceRecord a in existing)
+            {
+                if (a.WorkDate != workDate)
+                {
+                    merged.Add(a);
+                }
+            }
+            foreach (AbsenceRecord a in absencesForDate)
+            {
+                merged.Add(a);
+            }
+
+            merged.Sort(delegate(AbsenceRecord a, AbsenceRecord b)
+            {
+                int cmp = string.CompareOrdinal(a.WorkDate, b.WorkDate);
+                if (cmp != 0) return cmp;
+                return a.StartTime.CompareTo(b.StartTime);
+            });
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine(AbsencesHeader);
+            foreach (AbsenceRecord a in merged)
+            {
+                sb.AppendLine(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0};{1};{2};{3};{4};{5}",
+                    Sanitize(a.WorkDate),
+                    a.StartTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
+                    a.EndTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
+                    a.DurationSeconds,
+                    Sanitize(a.Type),
+                    Sanitize(a.Note)));
+            }
+
+            WriteAllTextAtomic(path, sb.ToString(), Utf8Bom);
+        }
+
         public List<DailyRecord> LoadDailyRecords()
         {
             List<DailyRecord> records = new List<DailyRecord>();
@@ -278,6 +365,7 @@ namespace RelogioAcompanhamento
                     }
                     int regSec = ParseHmsToSeconds(parts[4]);
                     int extraSec = ParseHmsToSeconds(parts[5]);
+                    int absenceSec = parts.Length >= 9 ? ParseHmsToSeconds(parts[8].Trim()) : 0;
 
                     DailyRecord rec = new DailyRecord();
                     rec.WorkDate = parts[0].Trim();
@@ -287,6 +375,7 @@ namespace RelogioAcompanhamento
                     rec.RegularSeconds = regSec;
                     rec.OvertimeSeconds = extraSec;
                     rec.StatusLabel = parts[7].Trim();
+                    rec.TotalAbsenceSeconds = absenceSec;
                     records.Add(rec);
                 }
             }
@@ -324,24 +413,7 @@ namespace RelogioAcompanhamento
                 return string.CompareOrdinal(a.WorkDate, b.WorkDate);
             });
 
-            StringBuilder sb = new StringBuilder();
-            sb.AppendLine(DailyHeader);
-            foreach (DailyRecord r in records)
-            {
-                sb.AppendLine(string.Format(
-                    CultureInfo.InvariantCulture,
-                    "{0};{1};{2};{3};{4};{5};{6};{7}",
-                    Sanitize(r.WorkDate),
-                    Sanitize(r.FirstStart),
-                    Sanitize(r.LastEnd),
-                    TimeFormat.FormatHms(r.TotalSeconds),
-                    TimeFormat.FormatHms(r.RegularSeconds),
-                    TimeFormat.FormatHms(r.OvertimeSeconds),
-                    r.TotalSeconds,
-                    Sanitize(r.StatusLabel)));
-            }
-
-            WriteAllTextAtomic(GetDailyFilePath(), sb.ToString(), Utf8Bom);
+            WriteDailyRecords(records);
         }
 
         public void DeleteDailyRecord(string workDate)
@@ -362,13 +434,18 @@ namespace RelogioAcompanhamento
                 }
             }
 
+            WriteDailyRecords(remaining);
+        }
+
+        private void WriteDailyRecords(List<DailyRecord> records)
+        {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine(DailyHeader);
-            foreach (DailyRecord r in remaining)
+            foreach (DailyRecord r in records)
             {
                 sb.AppendLine(string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0};{1};{2};{3};{4};{5};{6};{7}",
+                    "{0};{1};{2};{3};{4};{5};{6};{7};{8}",
                     Sanitize(r.WorkDate),
                     Sanitize(r.FirstStart),
                     Sanitize(r.LastEnd),
@@ -376,10 +453,11 @@ namespace RelogioAcompanhamento
                     TimeFormat.FormatHms(r.RegularSeconds),
                     TimeFormat.FormatHms(r.OvertimeSeconds),
                     r.TotalSeconds,
-                    Sanitize(r.StatusLabel)));
+                    Sanitize(r.StatusLabel),
+                    TimeFormat.FormatHms(r.TotalAbsenceSeconds)));
             }
 
-            WriteAllTextAtomic(path, sb.ToString(), Utf8Bom);
+            WriteAllTextAtomic(GetDailyFilePath(), sb.ToString(), Utf8Bom);
         }
 
         private static List<WorkSession> ReadSessionsFile(string path)
@@ -420,6 +498,55 @@ namespace RelogioAcompanhamento
                     ws.DurationSeconds = Math.Max(0, durSec);
                     ws.Reason = parts[4].Trim();
                     list.Add(ws);
+                }
+            }
+            catch
+            {
+                // Ignora linhas corrompidas
+            }
+            return list;
+        }
+
+        private static List<AbsenceRecord> ReadAbsencesFile(string path)
+        {
+            List<AbsenceRecord> list = new List<AbsenceRecord>();
+            try
+            {
+                string[] lines = File.ReadAllLines(path, Encoding.UTF8);
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    string line = lines[i].Trim();
+                    if (line.Length == 0) continue;
+                    string[] parts = line.Split(';');
+                    if (parts.Length < 5) continue;
+
+                    string workDate = parts[0].Trim();
+                    DateTime startDt;
+                    DateTime endDt;
+                    int durSec;
+
+                    if (!DateTime.TryParseExact(workDate + " " + parts[1].Trim(), "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out startDt))
+                    {
+                        continue;
+                    }
+                    if (!DateTime.TryParseExact(workDate + " " + parts[2].Trim(), "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out endDt))
+                    {
+                        endDt = startDt;
+                    }
+                    if (!int.TryParse(parts[3].Trim(), out durSec))
+                    {
+                        durSec = Math.Max(0, (int)(endDt - startDt).TotalSeconds);
+                    }
+
+                    AbsenceRecord rec = new AbsenceRecord();
+                    rec.WorkDate = workDate;
+                    rec.StartTime = startDt;
+                    rec.EndTime = endDt;
+                    rec.DurationSeconds = Math.Max(0, durSec);
+                    rec.Type = parts[4].Trim();
+                    rec.Note = parts.Length >= 6 ? parts[5].Trim() : string.Empty;
+                    rec.IsActive = false;
+                    list.Add(rec);
                 }
             }
             catch

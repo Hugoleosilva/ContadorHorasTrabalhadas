@@ -13,7 +13,12 @@ Aplicativo desktop ultraleve para Windows que acompanha as horas efetivamente tr
 
 ## Recursos
 
-- **Contagem real de horas trabalhadas**: congela automaticamente ao bloquear a tela (`Win + L` ou bloqueio automático do Windows), deslogar, suspender/hibernar ou desligar, e retoma ao voltar.
+- **Contagem real e Modo Reunião**:
+  - Congela automaticamente ao bloquear a tela (`Win + L` ou bloqueio automático do Windows), deslogar, suspender/hibernar ou desligar, e retoma ao voltar.
+  - **Modo Reunião (não pausar no bloqueio)**: ao ativar no menu de clique direito, você pode bloquear a tela para ir a uma sala de reunião sem congelar a contagem e sem registrar ausência.
+- **Registro de Ausências e Intervalos (sem alterar horas trabalhadas)**:
+  - Registra automaticamente o tempo ausente em bloqueios de tela e pausas rápidas, além de permitir **Pausar como Ausência** (*Intervalo / Almoço*, *Ida ao Médico*, *Pausa Rápida*, *Outra Ausência*) ou **Lançar Ausência Manual** com horário de início/fim e observação.
+  - Permite **reclassificar** qualquer ausência (ex.: transformar um *Bloqueio de Tela* em *Intervalo / Almoço* ou *Ida ao Médico*) e exibe o **total de ausências do dia** somado por categoria na aba **Ausências / Intervalos** e na coluna `TotalAusencias` do CSV diário.
 - **Pausa manual e início opcional**:
   - Botão `⏸ / ▶` direto no widget (e no menu da bandeja) para saídas rápidas sem bloquear o PC. Não pausa por mouse parado (ideal para reuniões, palestras e treinamentos).
   - No menu de clique direito, você pode marcar/desmarcar **Iniciar Contagem ao Abrir** (se desmarcar, o app abre pausado esperando você clicar em `▶`).
@@ -24,15 +29,14 @@ Aplicativo desktop ultraleve para Windows que acompanha as horas efetivamente tr
   - Passar o mouse sobre o botão na barra de tarefas (ou no ícone da bandeja) mostra o tempo trabalhado ao vivo mesmo minimizado.
   - Atalho global **`Ctrl + Alt + R`** também alterna a janela a qualquer momento.
   - Se preferir ocultar até da barra de tarefas (ficando só na bandeja ao lado do relógio), desmarque **Manter na Barra de Tarefas** no menu de clique direito.
-- **Alertas de jornada CLT (8h + 2h extras)**:
-  - `07:45` — pré-aviso (15 min para 8h)
-  - `08:00` — jornada diária concluída / início de hora extra
-  - `09:45` — pré-aviso do limite legal (15 min para 10h)
-  - `10:00` — limite legal de 10h atingido (destaque visual + notificação + alerta sonoro)
+- **Perfis de Jornada e Alertas Legais** *(selecionável em Jornada de Trabalho no menu)*:
+  - **Padrão — 8h diárias (+2h extras)** *(padrão)*: alertas em `07:45`, `08:00` (início extra), `09:45` e `10:00` (limite legal).
+  - **Estagiário — 6h diárias (sem extras)**: pré-aviso em `05:45` e alerta crítico de limite legal em `06:00`, sem acúmulo de horas extras.
 - **Registros em CSV simples** (salvos em `%LOCALAPPDATA%\RelogioAcompanhamento\`):
-  - `registros_diarios.csv` — resumo de cada dia (abre direto no Excel)
-  - `sessoes_YYYY-MM.csv` — detalhamento de todos os intervalos do mês
-  - `config.ini` — tamanho, posição e preferências
+  - `registros_diarios.csv` — resumo de cada dia com horas trabalhadas, extras e total de ausências (abre direto no Excel)
+  - `sessoes_YYYY-MM.csv` — detalhamento de todos os intervalos trabalhados do mês
+  - `ausencias_YYYY-MM.csv` — histórico detalhado de intervalos, idas ao médico, pausas e bloqueios de tela
+  - `config.ini` — perfil de jornada, tamanho, posição e preferências
 
 ## Tecnologias utilizadas e o porquê
 

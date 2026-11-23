@@ -5,9 +5,9 @@ namespace RelogioAcompanhamento
     public class AlertManager
     {
         private readonly CsvStorage _storage;
-        private readonly int _regularLimitSeconds;
-        private readonly int _overtimeLimitSeconds;
-        private readonly int _preAlertSeconds;
+        private int _regularLimitSeconds;
+        private int _overtimeLimitSeconds;
+        private int _preAlertSeconds;
         private AlertFlags _flags;
 
         public AlertManager(CsvStorage storage, int regularLimitSeconds, int overtimeLimitSeconds, int preAlertSeconds)
@@ -22,6 +22,13 @@ namespace RelogioAcompanhamento
         public int TotalLimitSeconds
         {
             get { return _regularLimitSeconds + _overtimeLimitSeconds; }
+        }
+
+        public void UpdateLimits(int regularLimitSeconds, int overtimeLimitSeconds, int preAlertSeconds)
+        {
+            _regularLimitSeconds = regularLimitSeconds;
+            _overtimeLimitSeconds = overtimeLimitSeconds;
+            _preAlertSeconds = preAlertSeconds;
         }
 
         public void ResetCache()
@@ -43,7 +50,7 @@ namespace RelogioAcompanhamento
             {
                 return AlertLevel.PreOvertimeLimit;
             }
-            if (totalWorkedSeconds >= _regularLimitSeconds)
+            if (_overtimeLimitSeconds > 0 && totalWorkedSeconds >= _regularLimitSeconds)
             {
                 return AlertLevel.Overtime;
             }
@@ -75,12 +82,18 @@ namespace RelogioAcompanhamento
                 _flags.PreLimitSent = true;
                 _flags.LimitSent = true;
                 changed = true;
-                notification = new AlertNotification(
-                    "Limite legal atingido!",
-                    string.Format("Você completou {0} ({1} + {2} extras). Encerre sua jornada para respeitar o limite legal.",
+
+                string msg = _overtimeLimitSeconds > 0
+                    ? string.Format("Você completou {0} ({1} + {2} extras). Encerre sua jornada para respeitar o limite legal.",
                         TimeFormat.FormatHm(totalLimit),
                         TimeFormat.FormatHm(_regularLimitSeconds),
-                        TimeFormat.FormatHm(_overtimeLimitSeconds)),
+                        TimeFormat.FormatHm(_overtimeLimitSeconds))
+                    : string.Format("Você completou {0} (Estagiário — sem possibilidade de horas extras). Encerre sua jornada para respeitar o limite legal.",
+                        TimeFormat.FormatHm(totalLimit));
+
+                notification = new AlertNotification(
+                    "Limite legal atingido!",
+                    msg,
                     true,
                     AlertLevel.LimitReached);
             }
@@ -100,7 +113,7 @@ namespace RelogioAcompanhamento
                     false,
                     AlertLevel.PreOvertimeLimit);
             }
-            else if (totalWorkedSeconds >= _regularLimitSeconds && !_flags.RegularSent)
+            else if (_overtimeLimitSeconds > 0 && totalWorkedSeconds >= _regularLimitSeconds && !_flags.RegularSent)
             {
                 _flags.PreRegularSent = true;
                 _flags.RegularSent = true;
@@ -118,11 +131,15 @@ namespace RelogioAcompanhamento
                 _flags.PreRegularSent = true;
                 changed = true;
                 int remainingMinutes = Math.Max(1, (int)Math.Ceiling((_regularLimitSeconds - totalWorkedSeconds) / 60.0));
+                string suffix = _overtimeLimitSeconds > 0
+                    ? " trabalhadas."
+                    : " (Estagiário — limite sem horas extras).";
                 notification = new AlertNotification(
                     "Fim da jornada se aproximando",
-                    string.Format("Faltam cerca de {0} min para completar {1} trabalhadas.",
+                    string.Format("Faltam cerca de {0} min para completar {1}{2}",
                         remainingMinutes,
-                        TimeFormat.FormatHm(_regularLimitSeconds)),
+                        TimeFormat.FormatHm(_regularLimitSeconds),
+                        suffix),
                     false,
                     AlertLevel.PreRegular);
             }

@@ -19,6 +19,8 @@ namespace RelogioAcompanhamento
         private int _overtimeLimitSeconds;
         private TrackerState _state;
         private AlertLevel _alertLevel;
+        private bool _inMeetingMode;
+        private string _activeAbsenceType;
         private bool _pulsePhase;
         private bool _isDemoMode;
 
@@ -52,6 +54,8 @@ namespace RelogioAcompanhamento
             _overtimeLimitSeconds = config.OvertimeLimitMinutes * 60;
             _state = TrackerState.Working;
             _alertLevel = AlertLevel.Normal;
+            _inMeetingMode = false;
+            _activeAbsenceType = string.Empty;
             _toolTip = new ToolTip();
             _toolTip.InitialDelay = 250;
             _toolTip.AutoPopDelay = 4000;
@@ -80,7 +84,6 @@ namespace RelogioAcompanhamento
                 AnchorBottomRight();
             }
 
-            // Garante criação do handle para receber atalho global e mensagem de instância única mesmo se iniciar oculto
             IntPtr h = Handle;
             if (h != IntPtr.Zero)
             {
@@ -113,13 +116,23 @@ namespace RelogioAcompanhamento
             Invalidate();
         }
 
-        public void UpdateDisplay(int totalSeconds, int regularLimitSeconds, int overtimeLimitSeconds, TrackerState state, AlertLevel alertLevel)
+        public void UpdateDisplay(
+            int totalSeconds,
+            int regularLimitSeconds,
+            int overtimeLimitSeconds,
+            TrackerState state,
+            AlertLevel alertLevel,
+            bool inMeetingMode,
+            string activeAbsenceType)
         {
             _totalSeconds = totalSeconds;
             _regularLimitSeconds = regularLimitSeconds;
             _overtimeLimitSeconds = overtimeLimitSeconds;
             _state = state;
             _alertLevel = alertLevel;
+            _inMeetingMode = inMeetingMode;
+            _activeAbsenceType = activeAbsenceType ?? string.Empty;
+
             if (alertLevel == AlertLevel.LimitReached && state == TrackerState.Working)
             {
                 _pulsePhase = !_pulsePhase;
@@ -130,7 +143,8 @@ namespace RelogioAcompanhamento
             }
 
             string titlePrefix = _isDemoMode ? "[DEMO] " : string.Empty;
-            string nextTitle = string.Format("{0}{1} — Relógio Acompanhamento", titlePrefix, TimeFormat.FormatHms(totalSeconds));
+            string meetingTag = (_inMeetingMode && _state == TrackerState.Working) ? " [Reunião]" : string.Empty;
+            string nextTitle = string.Format("{0}{1}{2} — Relógio Acompanhamento", titlePrefix, TimeFormat.FormatHms(totalSeconds), meetingTag);
             if (Text != nextTitle)
             {
                 Text = nextTitle;
@@ -197,7 +211,6 @@ namespace RelogioAcompanhamento
             {
                 Point pt = PointToClient(new Point(m.LParam.ToInt32() & 0xFFFF, (m.LParam.ToInt32() >> 16) & 0xFFFF));
 
-                // Prioriza clique nos mini-botões internos
                 if (_btnPauseRect.Contains(pt) || _btnHistoryRect.Contains(pt) || _btnHideRect.Contains(pt))
                 {
                     m.Result = new IntPtr(NativeMethods.HTCLIENT);
@@ -246,7 +259,6 @@ namespace RelogioAcompanhamento
                 return;
             }
 
-            // Arrastar janela clicando no corpo
             NativeMethods.ReleaseCapture();
             NativeMethods.SendMessage(Handle, NativeMethods.WM_NCLBUTTONDOWN, new IntPtr(NativeMethods.HTCAPTION), IntPtr.Zero);
             KeepInsideScreen();
@@ -274,12 +286,12 @@ namespace RelogioAcompanhamento
             if (_btnPauseRect.Contains(e.Location))
             {
                 nextHover = 1;
-                tip = _state == TrackerState.Working ? "Pausar manualmente" : "Retomar contagem";
+                tip = _state == TrackerState.Working ? "Pausar manualmente (botão direito para escolher tipo de ausência)" : "Retomar contagem";
             }
             else if (_btnHistoryRect.Contains(e.Location))
             {
                 nextHover = 2;
-                tip = "Ver histórico e registros do dia";
+                tip = "Ver histórico, registros e ausências";
             }
             else if (_btnHideRect.Contains(e.Location))
             {
@@ -337,13 +349,16 @@ namespace RelogioAcompanhamento
             {
                 borderColor = Color.FromArgb(194, 98, 24);
             }
+            else if (_state == TrackerState.Working && _inMeetingMode)
+            {
+                borderColor = Color.FromArgb(56, 189, 248);
+            }
 
             using (SolidBrush bg = new SolidBrush(bgColor))
             {
                 g.FillRectangle(bg, 0, 0, w, h);
             }
 
-            // Calcula áreas dos mini-botões no canto superior direito
             int btnSize = Math.Max(16, Math.Min(22, (int)(h * 0.30f)));
             int btnGap = 3;
             int rightPad = 8;
@@ -353,12 +368,10 @@ namespace RelogioAcompanhamento
             _btnHistoryRect = new Rectangle(_btnHideRect.Left - btnGap - btnSize, topPad, btnSize, btnSize);
             _btnPauseRect = new Rectangle(_btnHistoryRect.Left - btnGap - btnSize, topPad, btnSize, btnSize);
 
-            // Desenha os 3 mini-botões
             DrawMiniButton(g, _btnPauseRect, _hoveredButton == 1, 1);
             DrawMiniButton(g, _btnHistoryRect, _hoveredButton == 2, 2);
             DrawMiniButton(g, _btnHideRect, _hoveredButton == 3, 3);
 
-            // Ponto de status + texto de status na linha superior esquerda
             int leftPad = 10;
             int dotSize = Math.Max(7, Math.Min(10, (int)(h * 0.13f)));
             int dotY = topPad + (btnSize - dotSize) / 2;
@@ -373,8 +386,12 @@ namespace RelogioAcompanhamento
             int statusLeft = leftPad + dotSize + 6;
             int statusMaxWidth = Math.Max(20, _btnPauseRect.Left - statusLeft - 4);
 
+            Color statusColor = _state == TrackerState.Working
+                ? (_inMeetingMode && _alertLevel == AlertLevel.Normal ? Color.FromArgb(125, 211, 252) : Color.FromArgb(203, 213, 225))
+                : Color.FromArgb(148, 163, 184);
+
             using (Font statusFont = new Font("Segoe UI", statusFontPx, FontStyle.Regular, GraphicsUnit.Pixel))
-            using (SolidBrush statusBrush = new SolidBrush(_state == TrackerState.Working ? Color.FromArgb(203, 213, 225) : Color.FromArgb(148, 163, 184)))
+            using (SolidBrush statusBrush = new SolidBrush(statusColor))
             using (StringFormat sf = new StringFormat())
             {
                 sf.Trimming = StringTrimming.EllipsisCharacter;
@@ -384,7 +401,6 @@ namespace RelogioAcompanhamento
                 g.DrawString(statusText, statusFont, statusBrush, statusRect, sf);
             }
 
-            // Relógio principal (escala proporcional em pixels — imune a cortes em qualquer DPI)
             string timeText = TimeFormat.FormatHms(_totalSeconds);
             int barHeight = Math.Max(4, Math.Min(6, (int)(h * 0.08f)));
             int barTop = h - barHeight - 6;
@@ -411,11 +427,9 @@ namespace RelogioAcompanhamento
                 g.DrawString(timeText, clockFont, timeBrush, clockRect, sfClock);
             }
 
-            // Barra de progresso na base (8h normais + 2h extras)
             Rectangle barRect = new Rectangle(leftPad, barTop, w - (leftPad * 2), barHeight);
             DrawProgressBar(g, barRect);
 
-            // Borda fina ao redor do widget
             using (Pen borderPen = new Pen(borderColor, 1.5f))
             {
                 g.DrawRectangle(borderPen, 0.5f, 0.5f, w - 1.5f, h - 1.5f);
@@ -437,7 +451,7 @@ namespace RelogioAcompanhamento
             int cy = rect.Top + rect.Height / 2;
             int s = Math.Max(4, rect.Width / 4);
 
-            if (type == 1) // Pause / Play
+            if (type == 1)
             {
                 using (SolidBrush br = new SolidBrush(iconColor))
                 {
@@ -458,7 +472,7 @@ namespace RelogioAcompanhamento
                     }
                 }
             }
-            else if (type == 2) // History (3 linhas)
+            else if (type == 2)
             {
                 using (Pen p = new Pen(iconColor, 1.4f))
                 {
@@ -467,7 +481,7 @@ namespace RelogioAcompanhamento
                     g.DrawLine(p, cx - s, cy + s - 1, cx + s, cy + s - 1);
                 }
             }
-            else if (type == 3) // Hide (traço)
+            else if (type == 3)
             {
                 using (Pen p = new Pen(iconColor, 1.6f))
                 {
@@ -497,9 +511,24 @@ namespace RelogioAcompanhamento
                 int regularFilled = Math.Min(filledWidth, regularMarkerX - rect.Left);
                 if (regularFilled > 0)
                 {
-                    Color regColor = _state == TrackerState.Working
-                        ? Color.FromArgb(34, 197, 94)
-                        : Color.FromArgb(100, 116, 139);
+                    Color regColor;
+                    if (_state != TrackerState.Working)
+                    {
+                        regColor = Color.FromArgb(100, 116, 139);
+                    }
+                    else if (_overtimeLimitSeconds <= 0 && _alertLevel == AlertLevel.LimitReached)
+                    {
+                        regColor = Color.FromArgb(239, 68, 68);
+                    }
+                    else if (_inMeetingMode)
+                    {
+                        regColor = Color.FromArgb(56, 189, 248);
+                    }
+                    else
+                    {
+                        regColor = Color.FromArgb(34, 197, 94);
+                    }
+
                     using (SolidBrush regBrush = new SolidBrush(regColor))
                     {
                         g.FillRectangle(regBrush, rect.Left, rect.Top, regularFilled, rect.Height);
@@ -507,7 +536,7 @@ namespace RelogioAcompanhamento
                 }
 
                 int extraFilled = filledWidth - (regularMarkerX - rect.Left);
-                if (extraFilled > 0)
+                if (extraFilled > 0 && _overtimeLimitSeconds > 0)
                 {
                     Color extraColor = _alertLevel == AlertLevel.LimitReached
                         ? Color.FromArgb(239, 68, 68)
@@ -519,7 +548,6 @@ namespace RelogioAcompanhamento
                 }
             }
 
-            // Marcador sutil do limite de 8h
             if (_overtimeLimitSeconds > 0 && regularMarkerX > rect.Left + 2 && regularMarkerX < rect.Right - 2)
             {
                 using (Pen tickPen = new Pen(Color.FromArgb(24, 26, 32), 1.5f))
@@ -547,7 +575,7 @@ namespace RelogioAcompanhamento
                 case AlertLevel.LimitReached:
                     return Color.FromArgb(239, 68, 68);
                 default:
-                    return Color.FromArgb(34, 197, 94);
+                    return _inMeetingMode ? Color.FromArgb(56, 189, 248) : Color.FromArgb(34, 197, 94);
             }
         }
 
@@ -557,6 +585,10 @@ namespace RelogioAcompanhamento
 
             if (_state == TrackerState.PausedManual)
             {
+                if (!string.IsNullOrEmpty(_activeAbsenceType))
+                {
+                    return prefix + AbsenceTypes.GetShortWidgetLabel(_activeAbsenceType);
+                }
                 return prefix + "Pausado";
             }
             if (_state == TrackerState.PausedSession)
@@ -564,20 +596,24 @@ namespace RelogioAcompanhamento
                 return prefix + "Congelado";
             }
 
-            int extraSec = _totalSeconds > _regularLimitSeconds ? _totalSeconds - _regularLimitSeconds : 0;
+            int totalLimitHours = Math.Max(1, (_regularLimitSeconds + _overtimeLimitSeconds) / 3600);
+            int regLimitHours = Math.Max(1, _regularLimitSeconds / 3600);
+            int extraSec = (_overtimeLimitSeconds > 0 && _totalSeconds > _regularLimitSeconds)
+                ? _totalSeconds - _regularLimitSeconds
+                : 0;
 
             switch (_alertLevel)
             {
                 case AlertLevel.LimitReached:
-                    return prefix + "LIMITE 10h!";
+                    return prefix + string.Format("LIMITE {0}h!", totalLimitHours);
                 case AlertLevel.PreOvertimeLimit:
                     return prefix + "Extra +" + TimeFormat.FormatHm(extraSec) + " (!)";
                 case AlertLevel.Overtime:
                     return prefix + "Extra +" + TimeFormat.FormatHm(extraSec);
                 case AlertLevel.PreRegular:
-                    return prefix + "Quase 8h";
+                    return prefix + string.Format("Quase {0}h", regLimitHours);
                 default:
-                    return prefix + "Trabalhando";
+                    return prefix + (_inMeetingMode ? "Em reunião" : "Trabalhando");
             }
         }
 
