@@ -336,6 +336,24 @@ namespace RelogioAcompanhamento.Tests
                 AssertTrue(tracker.UpdateAbsence(0, AbsenceTypes.Outro, "Reclassificado"), "UpdateAbsence deve funcionar");
                 AssertTrue(tracker.DeleteAbsence(0), "DeleteAbsence deve funcionar");
                 AssertEqual(9000, tracker.GetTodayAbsenceSeconds(), "Apos excluir 15 min deve restar 2h30 (9000s)");
+
+                // Substituir bloqueio automatico sobreposto sem duplicar
+                tracker.AddManualAbsence(
+                    new DateTime(2026, 11, 23, 16, 7, 5),
+                    new DateTime(2026, 11, 23, 17, 6, 48),
+                    AbsenceTypes.BloqueioTela,
+                    string.Empty);
+                AssertEqual(1, tracker.FindOverlappingAutoAbsenceIndices(
+                    new DateTime(2026, 11, 23, 16, 7, 0),
+                    new DateTime(2026, 11, 23, 17, 7, 0)).Count, "Deve detectar bloqueio sobreposto");
+
+                tracker.AddManualAbsence(
+                    new DateTime(2026, 11, 23, 16, 7, 0),
+                    new DateTime(2026, 11, 23, 17, 7, 0),
+                    AbsenceTypes.Medico,
+                    "Ortopedia",
+                    true);
+                AssertEqual(12600, tracker.GetTodayAbsenceSeconds(), "Substituicao nao deve duplicar o tempo (2h30 + 1h = 3h30)");
             }
             finally
             {

@@ -269,11 +269,43 @@ namespace RelogioAcompanhamento
             }
         }
 
+        public List<int> FindOverlappingAutoAbsenceIndices(DateTime startTime, DateTime endTime)
+        {
+            List<int> indices = new List<int>();
+            for (int i = 0; i < _completedAbsences.Count; i++)
+            {
+                AbsenceRecord a = _completedAbsences[i];
+                if (a.Type != AbsenceTypes.BloqueioTela && a.Type != AbsenceTypes.PausaRapida)
+                {
+                    continue;
+                }
+                if (a.StartTime < endTime && a.EndTime > startTime)
+                {
+                    indices.Add(i);
+                }
+            }
+            return indices;
+        }
+
         public void AddManualAbsence(DateTime startTime, DateTime endTime, string type, string note)
+        {
+            AddManualAbsence(startTime, endTime, type, note, false);
+        }
+
+        public void AddManualAbsence(DateTime startTime, DateTime endTime, string type, string note, bool replaceOverlappingAuto)
         {
             if (endTime <= startTime)
             {
                 return;
+            }
+
+            if (replaceOverlappingAuto)
+            {
+                List<int> overlapping = FindOverlappingAutoAbsenceIndices(startTime, endTime);
+                for (int i = overlapping.Count - 1; i >= 0; i--)
+                {
+                    _completedAbsences.RemoveAt(overlapping[i]);
+                }
             }
 
             DateTime now = _clock();

@@ -112,7 +112,7 @@ namespace RelogioAcompanhamento
             absSp1.Dock = DockStyle.Left;
             absSp1.Width = (int)Math.Round(8 * dpiScale);
 
-            Button btnEditAbsence = CreateActionButton("Editar Tipo / Obs", (int)Math.Round(140 * dpiScale));
+            Button btnEditAbsence = CreateActionButton("Justificar / Editar", (int)Math.Round(150 * dpiScale));
             btnEditAbsence.Dock = DockStyle.Left;
             btnEditAbsence.Click += delegate { OpenEditSelectedAbsenceDialog(); };
 
@@ -124,6 +124,15 @@ namespace RelogioAcompanhamento
             btnDeleteAbsence.Dock = DockStyle.Left;
             btnDeleteAbsence.Click += delegate { DeleteSelectedAbsence(); };
 
+            Label lblInlineHint = new Label();
+            lblInlineHint.Text = "Dica: dê duplo clique em um Bloqueio de Tela para justificar direto na linha";
+            lblInlineHint.Dock = DockStyle.Fill;
+            lblInlineHint.TextAlign = ContentAlignment.MiddleRight;
+            lblInlineHint.ForeColor = Color.FromArgb(148, 163, 184);
+            lblInlineHint.Font = new Font("Segoe UI", 8f, FontStyle.Italic);
+            lblInlineHint.AutoEllipsis = true;
+
+            absToolbar.Controls.Add(lblInlineHint);
             absToolbar.Controls.Add(btnDeleteAbsence);
             absToolbar.Controls.Add(absSp2);
             absToolbar.Controls.Add(btnEditAbsence);
@@ -247,7 +256,19 @@ namespace RelogioAcompanhamento
             {
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
-                    _tracker.AddManualAbsence(dlg.SelectedStart, dlg.SelectedEnd, dlg.SelectedType, dlg.EnteredNote);
+                    bool replaceAuto = false;
+                    List<int> overlapping = _tracker.FindOverlappingAutoAbsenceIndices(dlg.SelectedStart, dlg.SelectedEnd);
+                    if (overlapping.Count > 0)
+                    {
+                        DialogResult ask = MessageBox.Show(
+                            "Já existe um registro automático (Bloqueio de Tela / Pausa) neste horário.\n\nDeseja substituir o registro automático por esta justificativa para não duplicar o tempo ausente?",
+                            "Evitar duplicidade",
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Question);
+                        replaceAuto = (ask == DialogResult.Yes);
+                    }
+
+                    _tracker.AddManualAbsence(dlg.SelectedStart, dlg.SelectedEnd, dlg.SelectedType, dlg.EnteredNote, replaceAuto);
                     RefreshData();
                     RaiseDataModified();
                 }
@@ -381,13 +402,23 @@ namespace RelogioAcompanhamento
             for (int i = absences.Count - 1; i >= 0; i--)
             {
                 AbsenceRecord a = absences[i];
+                string noteDisplay = a.Note;
+                if (string.IsNullOrEmpty(noteDisplay) && !a.IsActive && a.Type == AbsenceTypes.BloqueioTela)
+                {
+                    noteDisplay = "(duplo clique para justificar)";
+                }
+
                 int rowIdx = _gridAbsences.Rows.Add(
                     a.StartTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
                     a.IsActive ? "Agora" : a.EndTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
                     TimeFormat.FormatHms(a.DurationSeconds),
                     AbsenceTypes.GetDisplayName(a.Type),
-                    a.Note);
+                    noteDisplay);
                 _gridAbsences.Rows[rowIdx].Tag = a.IsActive ? -1 : i;
+                if (string.IsNullOrEmpty(a.Note) && !a.IsActive && a.Type == AbsenceTypes.BloqueioTela)
+                {
+                    _gridAbsences.Rows[rowIdx].Cells["Observacao"].Style.ForeColor = Color.FromArgb(148, 163, 184);
+                }
             }
             if (selAbsenceIdx >= 0 && selAbsenceIdx < _gridAbsences.Rows.Count)
             {
@@ -396,7 +427,7 @@ namespace RelogioAcompanhamento
 
             AbsenceSummary absSum = _tracker.GetTodayAbsenceSummary();
             _lblAbsenceBreakdown.Text = string.Format(
-                "Resumo de ausências hoje — Intervalo: {0}  |  Médico: {1}  |  Pausas: {2}  |  Bloqueio: {3}  |  Outras: {4}",
+                "Hoje — Intervalo: {0}  |  Médico: {1}  |  Pausas: {2}  |  Bloqueio: {3}  |  Outras: {4}",
                 TimeFormat.FormatHms(absSum.IntervaloSeconds),
                 TimeFormat.FormatHms(absSum.MedicoSeconds),
                 TimeFormat.FormatHms(absSum.PausaRapidaSeconds),

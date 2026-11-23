@@ -286,7 +286,19 @@ namespace RelogioAcompanhamento
             {
                 if (dlg.ShowDialog() == DialogResult.OK)
                 {
-                    _tracker.AddManualAbsence(dlg.SelectedStart, dlg.SelectedEnd, dlg.SelectedType, dlg.EnteredNote);
+                    bool replaceAuto = false;
+                    System.Collections.Generic.List<int> overlapping = _tracker.FindOverlappingAutoAbsenceIndices(dlg.SelectedStart, dlg.SelectedEnd);
+                    if (overlapping.Count > 0)
+                    {
+                        DialogResult ask = MessageBox.Show(
+                            "Já existe um registro automático (Bloqueio de Tela / Pausa) neste horário.\n\nDeseja substituir o registro automático por esta justificativa para não duplicar o tempo ausente?",
+                            "Evitar duplicidade",
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Question);
+                        replaceAuto = (ask == DialogResult.Yes);
+                    }
+
+                    _tracker.AddManualAbsence(dlg.SelectedStart, dlg.SelectedEnd, dlg.SelectedType, dlg.EnteredNote, replaceAuto);
                     UpdateUiAndAlerts();
                 }
             }
