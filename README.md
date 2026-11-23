@@ -12,6 +12,16 @@ Aplicativo desktop ultraleve para Windows que acompanha as horas efetivamente tr
 | :---: | :---: |
 | ![Submenu Jornada de Trabalho](docs/images/menu-jornada.png) | ![Submenu Pausar como Ausência](docs/images/menu-ausencia.png) |
 
+### Alertas de Jornada e Hora Extra
+
+| Pré-aviso de 15 min (07:45) | Mini-widget em pré-aviso (`Quase 8h`) |
+| :---: | :---: |
+| ![Notificação do Windows faltando 15 min para 8h](docs/images/alerta-pre-8h.png) | ![Mini-widget com indicador amarelo Quase 8h](docs/images/widget-quase-8h.png) |
+
+| Jornada de 8h concluída (início de hora extra) | Mini-widget em Hora Extra (borda e indicador laranja) |
+| :---: | :---: |
+| ![Notificação do Windows de 8h concluídas e início de hora extra](docs/images/alerta-8h-extra.png) | ![Mini-widget em modo Hora Extra](docs/images/widget-hora-extra.png) |
+
 ### Controle de Ausências / Intervalos, Sessões e Registros Diários
 
 ![Aba Ausências e Intervalos com justificativa inline e resumo por categoria](docs/images/ausencias-intervalos-v3.png)
