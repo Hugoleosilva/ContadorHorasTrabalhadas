@@ -2,6 +2,15 @@
 
 Aplicativo desktop ultraleve para Windows que acompanha as horas efetivamente trabalhadas no dia.
 
+## Visualização
+
+| Mini-widget no canto inferior direito + Barra de Tarefas | Menu de controle rápido (clique direito) |
+| :---: | :---: |
+| ![Mini-widget flutuante e ícone na barra de tarefas](docs/images/widget-barra-tarefas.png) | ![Menu de contexto com opções rápidas](docs/images/menu-contexto.png) |
+
+### Registros e Histórico do Dia
+![Janela de Registros e Histórico com sessões de bloqueio de tela](docs/images/historico-sessoes.png)
+
 ## Recursos
 
 - **Contagem real de horas trabalhadas**: congela automaticamente ao bloquear a tela (`Win + L` ou bloqueio automático do Windows), deslogar, suspender/hibernar ou desligar, e retoma ao voltar.
