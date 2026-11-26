@@ -267,10 +267,60 @@ namespace RelogioAcompanhamento
         public bool RegularSent { get; set; }
         public bool PreLimitSent { get; set; }
         public bool LimitSent { get; set; }
+        public bool FatigueSent { get; set; }
 
         public AlertFlags()
         {
             WorkDate = string.Empty;
+        }
+    }
+
+    public class WeekdayProfile
+    {
+        public DayOfWeek DayOfWeek { get; set; }
+        public string DayNamePt { get; set; }
+        public int SampleCount { get; set; }
+        public int MedianStartMinutes { get; set; }
+        public int MedianEndMinutes { get; set; }
+        public int EmaBalanceSeconds { get; set; }
+        public int StdDevBalanceSeconds { get; set; }
+
+        public WeekdayProfile()
+        {
+            DayNamePt = string.Empty;
+            MedianStartMinutes = -1;
+            MedianEndMinutes = -1;
+        }
+    }
+
+    public class WeeklyFatigueContext
+    {
+        public int ConsecutiveOvertimeDays { get; set; }
+        public int ConsecutiveLateExitDays { get; set; }
+        public int WeekClosedBalanceSeconds { get; set; }
+    }
+
+    public class CycleSimulationResult
+    {
+        public int RecordedDaysCount { get; set; }
+        public int MinRequiredDays { get; set; }
+        public bool HasEnoughData { get; set; }
+        public int RemainingWeekdays { get; set; }
+        public DateTime CycleEndDate { get; set; }
+        public int CurrentCycleBalanceSeconds { get; set; }
+        public int RealisticProjectedBalanceSeconds { get; set; }
+        public int ConservativeProjectedBalanceSeconds { get; set; }
+        public int WeeklyAdjustmentToZeroSeconds { get; set; }
+        public string BestCompensationDayName { get; set; }
+        public string RecommendationText { get; set; }
+        public List<WeekdayProfile> WeekdayProfiles { get; set; }
+
+        public CycleSimulationResult()
+        {
+            MinRequiredDays = 10;
+            BestCompensationDayName = string.Empty;
+            RecommendationText = string.Empty;
+            WeekdayProfiles = new List<WeekdayProfile>();
         }
     }
 
@@ -307,6 +357,11 @@ namespace RelogioAcompanhamento
         public int RegularLimitMinutes { get; set; }
         public int OvertimeLimitMinutes { get; set; }
         public int PreAlertMinutes { get; set; }
+        public bool WellnessReminderEnabled { get; set; }
+        public int WellnessIntervalMinutes { get; set; }
+        public bool SilenceWellnessInMeeting { get; set; }
+        public bool PreRegularAlertEnabled { get; set; }
+        public bool FatigueAlertEnabled { get; set; }
 
         public AppConfig()
         {
@@ -325,6 +380,11 @@ namespace RelogioAcompanhamento
             RegularLimitMinutes = 480;   // 8 horas
             OvertimeLimitMinutes = 120;  // +2 horas extras (CLT)
             PreAlertMinutes = 15;        // Pré-aviso 15 minutos antes
+            WellnessReminderEnabled = true;
+            WellnessIntervalMinutes = 45;
+            SilenceWellnessInMeeting = true;
+            PreRegularAlertEnabled = true;
+            FatigueAlertEnabled = true;
         }
 
         public void ApplyProfile(WorkProfile profile)

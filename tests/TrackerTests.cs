@@ -25,6 +25,10 @@ namespace RelogioAcompanhamento.Tests
             Run("BancoDeHorasTolerancia15MinEAbono", TestHourBankToleranceAndCredit);
             Run("BancoDeHorasCiclosCorte11A10EDiasPendentes", TestHourBankPeriodsAndOverrides);
             Run("ModoUsoPessoalNaoContabiliza", TestPersonalUseModeDoesNotCount);
+            Run("BemEstarTimerAtivoPausaEReuniao", TestWellnessContextualReminders);
+            Run("AlertaFadigaNoturnaEContextoSemanal", TestFatigueAndEnrichedPreAlert);
+            Run("RadarPadroesColdStartMenosDe10Dias", TestRadarColdStart);
+            Run("SimuladorFechamentoCicloCom12Dias", TestCycleSimulatorAndWeekdayRadar);
 
             Console.WriteLine();
             Console.WriteLine(string.Format("Resultado: {0} passou(ram), {1} falhou(aram).", _passed, _failed));
@@ -507,6 +511,187 @@ namespace RelogioAcompanhamento.Tests
             {
                 CleanupDir(dir);
             }
+        }
+
+        private static void TestWellnessContextualReminders()
+        {
+            string dir = CreateTempDir();
+            try
+            {
+                CsvStorage storage = new CsvStorage(dir);
+                WellnessMonitor wellness = new WellnessMonitor(storage);
+                AppConfig cfg = new AppConfig();
+                cfg.WellnessReminderEnabled = true;
+                cfg.WellnessIntervalMinutes = 30;
+                cfg.SilenceWellnessInMeeting = true;
+
+                DateTime now = new DateTime(2026, 11, 26, 9, 0, 0);
+                // Inicia trabalhando e acumula 20 minutos
+                wellness.Tick(now, "2026-11-26", TrackerState.Working, false, false, cfg);
+                for (int i = 1; i <= 20 * 60; i++)
+                {
+                    now = now.AddSeconds(1);
+                    AlertNotification n = wellness.Tick(now, "2026-11-26", TrackerState.Working, false, false, cfg);
+                    AssertTrue(n == null, "Nao deve disparar antes dos 30 min");
+                }
+                AssertEqual(1200, wellness.ActiveStreakSeconds, "Deve acumular 20 min ativos");
+
+                // Faz pausa natural de 6 minutos -> deve zerar o timer de bem-estar!
+                now = now.AddSeconds(1);
+                wellness.Tick(now, "2026-11-26", TrackerState.PausedManual, false, false, cfg);
+                now = now.AddMinutes(6);
+                wellness.Tick(now, "2026-11-26", TrackerState.Working, false, false, cfg);
+                AssertEqual(0, wellness.ActiveStreakSeconds, "Pausa >= 5 min deve zerar o contador de bem-estar");
+
+                // Agora acumula 30 min em Modo Reuniao -> deve segurar o aviso!
+                for (int i = 1; i <= 30 * 60; i++)
+                {
+                    now = now.AddSeconds(1);
+                    AlertNotification n = wellness.Tick(now, "2026-11-26", TrackerState.Working, false, true, cfg);
+                    AssertTrue(n == null, "Modo reuniao deve segurar o lembrete de bem-estar");
+                }
+                AssertTrue(wellness.PendingAfterMeeting, "Deve ficar pendente para disparar apos a reuniao");
+
+                // Encerra Modo Reuniao -> deve disparar imediatamente!
+                now = now.AddSeconds(1);
+                AlertNotification afterMeet = wellness.Tick(now, "2026-11-26", TrackerState.Working, false, false, cfg);
+                AssertTrue(afterMeet != null && afterMeet.Title.IndexOf("Reunião encerrada", StringComparison.OrdinalIgnoreCase) >= 0,
+                    "Deve disparar lembrete logo apos encerrar Modo Reuniao");
+            }
+            finally
+            {
+                CleanupDir(dir);
+            }
+        }
+
+        private static void TestFatigueAndEnrichedPreAlert()
+        {
+            string dir = CreateTempDir();
+            try
+            {
+                CsvStorage storage = new CsvStorage(dir);
+                WellnessMonitor wellness = new WellnessMonitor(storage);
+                AlertManager alerts = new AlertManager(storage, 8 * 3600, 2 * 3600, 15 * 60);
+                AppConfig cfg = new AppConfig();
+                cfg.FatigueAlertEnabled = true;
+                cfg.PreRegularAlertEnabled = true;
+
+                WeeklyFatigueContext ctx = new WeeklyFatigueContext();
+                ctx.ConsecutiveOvertimeDays = 3;
+                ctx.WeekClosedBalanceSeconds = 3 * 3600 + 21 * 60;
+
+                string hint = PatternRadarCalculator.BuildPreRegularContextHint(ctx);
+                AlertNotification pre = alerts.Evaluate("2026-11-26", 7 * 3600 + 45 * 60, true, hint);
+                AssertTrue(pre != null && pre.Message.IndexOf("3 dias seguidos", StringComparison.OrdinalIgnoreCase) >= 0,
+                    "Aviso de 7h45 deve vir enriquecido com contexto semanal");
+
+                // Alerta de fadiga noturna apos 19:30 dispara 1 vez no dia
+                AlertNotification fat1 = wellness.EvaluateFatigue(
+                    new DateTime(2026, 11, 26, 19, 35, 0),
+                    "2026-11-26",
+                    TrackerState.Working,
+                    false,
+                    false,
+                    8 * 3600,
+                    ctx,
+                    cfg);
+                AssertTrue(fat1 != null, "Apos 19:30 deve disparar alerta de fadiga");
+
+                AlertNotification fat2 = wellness.EvaluateFatigue(
+                    new DateTime(2026, 11, 26, 19, 45, 0),
+                    "2026-11-26",
+                    TrackerState.Working,
+                    false,
+                    false,
+                    8 * 3600 + 600,
+                    ctx,
+                    cfg);
+                AssertTrue(fat2 == null, "Alerta de fadiga nao deve repetir no mesmo dia");
+            }
+            finally
+            {
+                CleanupDir(dir);
+            }
+        }
+
+        private static void TestRadarColdStart()
+        {
+            List<DailyRecord> daily = new List<DailyRecord>();
+            for (int i = 0; i < 4; i++)
+            {
+                DailyRecord r = new DailyRecord();
+                r.WorkDate = new DateTime(2026, 11, 23).AddDays(i).ToString("yyyy-MM-dd");
+                r.TotalSeconds = 8 * 3600;
+                r.FirstStart = "09:00:00";
+                r.LastEnd = "18:00:00";
+                daily.Add(r);
+            }
+
+            CycleSimulationResult sim = PatternRadarCalculator.Analyze(
+                new DateTime(2026, 11, 27),
+                daily,
+                new Dictionary<string, int>(),
+                new Dictionary<string, DayOverrideRecord>(),
+                new DateTime(2026, 11, 23),
+                0);
+
+            AssertEqual(false, sim.HasEnoughData, "Com menos de 10 dias nao deve liberar previsao");
+            AssertEqual(4, sim.RecordedDaysCount, "Deve contar 4 dias registrados");
+        }
+
+        private static void TestCycleSimulatorAndWeekdayRadar()
+        {
+            // Cria 12 dias uteis (de 23/11 a 08/12): Seg/Qua com +1h extra, Sex calma (8h exatas)
+            List<DailyRecord> daily = new List<DailyRecord>();
+            DateTime start = new DateTime(2026, 11, 23);
+            int added = 0;
+            DateTime cursor = start;
+            while (added < 12)
+            {
+                if (HourBankCalculator.IsWeekday(cursor))
+                {
+                    DailyRecord r = new DailyRecord();
+                    r.WorkDate = cursor.ToString("yyyy-MM-dd");
+                    r.FirstStart = "09:00:00";
+                    if (cursor.DayOfWeek == DayOfWeek.Monday || cursor.DayOfWeek == DayOfWeek.Wednesday)
+                    {
+                        r.TotalSeconds = 9 * 3600; // +1h extra
+                        r.LastEnd = "19:00:00";
+                    }
+                    else
+                    {
+                        r.TotalSeconds = 8 * 3600; // 0 saldo
+                        r.LastEnd = "18:00:00";
+                    }
+                    daily.Add(r);
+                    added++;
+                }
+                cursor = cursor.AddDays(1);
+            }
+
+            // Cadastra Natal (25/12/2026) como feriado futuro -> deve descontar dos dias uteis restantes
+            Dictionary<string, DayOverrideRecord> overrides = new Dictionary<string, DayOverrideRecord>();
+            DayOverrideRecord natal = new DayOverrideRecord();
+            natal.WorkDate = "2026-12-25";
+            natal.Type = DaySpecialTypes.Feriado;
+            natal.CreditedSeconds = 8 * 3600;
+            overrides["2026-12-25"] = natal;
+
+            CycleSimulationResult sim = PatternRadarCalculator.Analyze(
+                cursor, // 09/12/2026
+                daily,
+                new Dictionary<string, int>(),
+                overrides,
+                start,
+                5 * 3600);
+
+            AssertEqual(true, sim.HasEnoughData, "Com 12 dias deve liberar Radar e Simulador");
+            AssertEqual(12, sim.RecordedDaysCount, "Deve contar 12 dias uteis");
+            AssertTrue(sim.RealisticProjectedBalanceSeconds > sim.ConservativeProjectedBalanceSeconds,
+                "Com historico de horas extras, projecao realista deve superar a conservadora");
+            AssertTrue(sim.WeekdayProfiles.Count == 5, "Deve gerar perfil dos 5 dias uteis (Seg-Sex)");
+            AssertTrue(sim.BestCompensationDayName != "Segunda-feira" && sim.BestCompensationDayName != "Quarta-feira",
+                "Nao deve recomendar dias de pico de extra como melhor janela de compensacao");
         }
     }
 }

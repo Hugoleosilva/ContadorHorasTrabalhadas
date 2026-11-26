@@ -132,6 +132,11 @@ namespace RelogioAcompanhamento
                     else if (!profileExplicit && key == "RegularLimitMinutes" && int.TryParse(val, out intVal) && intVal > 0) config.RegularLimitMinutes = intVal;
                     else if (!profileExplicit && key == "OvertimeLimitMinutes" && int.TryParse(val, out intVal) && intVal >= 0) config.OvertimeLimitMinutes = intVal;
                     else if (key == "PreAlertMinutes" && int.TryParse(val, out intVal) && intVal >= 0) config.PreAlertMinutes = intVal;
+                    else if (key == "WellnessReminderEnabled" && bool.TryParse(val, out boolVal)) config.WellnessReminderEnabled = boolVal;
+                    else if (key == "WellnessIntervalMinutes" && int.TryParse(val, out intVal) && (intVal == 30 || intVal == 45 || intVal == 60)) config.WellnessIntervalMinutes = intVal;
+                    else if (key == "SilenceWellnessInMeeting" && bool.TryParse(val, out boolVal)) config.SilenceWellnessInMeeting = boolVal;
+                    else if (key == "PreRegularAlertEnabled" && bool.TryParse(val, out boolVal)) config.PreRegularAlertEnabled = boolVal;
+                    else if (key == "FatigueAlertEnabled" && bool.TryParse(val, out boolVal)) config.FatigueAlertEnabled = boolVal;
                 }
             }
             catch
@@ -162,6 +167,11 @@ namespace RelogioAcompanhamento
             sb.AppendLine("RegularLimitMinutes=" + config.RegularLimitMinutes.ToString(CultureInfo.InvariantCulture));
             sb.AppendLine("OvertimeLimitMinutes=" + config.OvertimeLimitMinutes.ToString(CultureInfo.InvariantCulture));
             sb.AppendLine("PreAlertMinutes=" + config.PreAlertMinutes.ToString(CultureInfo.InvariantCulture));
+            sb.AppendLine("WellnessReminderEnabled=" + config.WellnessReminderEnabled.ToString());
+            sb.AppendLine("WellnessIntervalMinutes=" + config.WellnessIntervalMinutes.ToString(CultureInfo.InvariantCulture));
+            sb.AppendLine("SilenceWellnessInMeeting=" + config.SilenceWellnessInMeeting.ToString());
+            sb.AppendLine("PreRegularAlertEnabled=" + config.PreRegularAlertEnabled.ToString());
+            sb.AppendLine("FatigueAlertEnabled=" + config.FatigueAlertEnabled.ToString());
             WriteAllTextAtomic(GetConfigPath(), sb.ToString(), Utf8Bom);
         }
 
@@ -178,7 +188,7 @@ namespace RelogioAcompanhamento
             try
             {
                 string savedDate = string.Empty;
-                bool preReg = false, reg = false, preLim = false, lim = false;
+                bool preReg = false, reg = false, preLim = false, lim = false, fat = false;
                 string[] lines = File.ReadAllLines(path, Encoding.UTF8);
                 foreach (string rawLine in lines)
                 {
@@ -192,6 +202,7 @@ namespace RelogioAcompanhamento
                     else if (key == "RegularSent" && bool.TryParse(val, out b)) reg = b;
                     else if (key == "PreLimitSent" && bool.TryParse(val, out b)) preLim = b;
                     else if (key == "LimitSent" && bool.TryParse(val, out b)) lim = b;
+                    else if (key == "FatigueSent" && bool.TryParse(val, out b)) fat = b;
                 }
 
                 if (savedDate == workDate)
@@ -200,6 +211,7 @@ namespace RelogioAcompanhamento
                     flags.RegularSent = reg;
                     flags.PreLimitSent = preLim;
                     flags.LimitSent = lim;
+                    flags.FatigueSent = fat;
                 }
             }
             catch
@@ -219,6 +231,7 @@ namespace RelogioAcompanhamento
             sb.AppendLine("RegularSent=" + flags.RegularSent.ToString());
             sb.AppendLine("PreLimitSent=" + flags.PreLimitSent.ToString());
             sb.AppendLine("LimitSent=" + flags.LimitSent.ToString());
+            sb.AppendLine("FatigueSent=" + flags.FatigueSent.ToString());
             WriteAllTextAtomic(GetAlertFlagsPath(), sb.ToString(), Utf8Bom);
         }
 

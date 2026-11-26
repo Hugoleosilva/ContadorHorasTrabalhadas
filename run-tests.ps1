@@ -21,6 +21,8 @@ $argsList = @(
     (Join-Path $srcDir 'Models.cs'),
     (Join-Path $srcDir 'CsvStorage.cs'),
     (Join-Path $srcDir 'HourBankCalculator.cs'),
+    (Join-Path $srcDir 'PatternRadarCalculator.cs'),
+    (Join-Path $srcDir 'WellnessMonitor.cs'),
     (Join-Path $srcDir 'TimeTracker.cs'),
     (Join-Path $srcDir 'AlertManager.cs'),
     $testFile

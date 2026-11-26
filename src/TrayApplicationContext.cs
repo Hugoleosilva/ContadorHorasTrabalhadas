@@ -14,9 +14,13 @@ namespace RelogioAcompanhamento
         private readonly AppConfig _config;
         private readonly TimeTracker _tracker;
         private readonly AlertManager _alerts;
+        private readonly WellnessMonitor _wellness;
         private readonly FloatingWidgetForm _widget;
         private readonly NotifyIcon _trayIcon;
         private readonly Timer _tickTimer;
+
+        private WeeklyFatigueContext _cachedWeeklyContext;
+        private string _cachedWeeklyContextDate;
 
         private HistoryForm _historyForm;
         private ToolStripMenuItem _menuShowHide;
@@ -67,6 +71,8 @@ namespace RelogioAcompanhamento
             _tracker.Initialize(_config.AutoStartCounting, startPersonal);
 
             _alerts = new AlertManager(_storage, regularSec, overtimeSec, preAlertSec);
+            _wellness = new WellnessMonitor(_storage);
+            _cachedWeeklyContextDate = string.Empty;
 
             ContextMenuStrip menu = BuildContextMenu();
 
@@ -152,6 +158,10 @@ namespace RelogioAcompanhamento
             menuProfile.DropDownItems.Add(_menuProfileClt);
             menuProfile.DropDownItems.Add(_menuProfileEstagiario);
             menu.Items.Add(menuProfile);
+
+            ToolStripMenuItem menuWellness = new ToolStripMenuItem("Bem-Estar e Lembretes...");
+            menuWellness.Click += delegate { OpenWellnessSettings(); };
+            menu.Items.Add(menuWellness);
 
             ToolStripMenuItem menuSize = new ToolStripMenuItem("Tamanho da Janela");
             ToolStripMenuItem sizeCompact = new ToolStripMenuItem("Compacto (165 x 50)");
@@ -335,6 +345,48 @@ namespace RelogioAcompanhamento
                     UpdateUiAndAlerts();
                 }
             }
+        }
+
+        private void OpenWellnessSettings()
+        {
+            bool mutedToday = _wellness.IsMutedForDate(_tracker.CurrentDate);
+            using (WellnessSettingsForm dlg = new WellnessSettingsForm(_config, mutedToday))
+            {
+                if (dlg.ShowDialog() == DialogResult.OK)
+                {
+                    _config.WellnessReminderEnabled = dlg.WellnessEnabled;
+                    _config.WellnessIntervalMinutes = dlg.WellnessIntervalMinutes;
+                    _config.SilenceWellnessInMeeting = dlg.SilenceInMeeting;
+                    _config.PreRegularAlertEnabled = dlg.PreRegularEnabled;
+                    _config.FatigueAlertEnabled = dlg.FatigueEnabled;
+                    _storage.SaveConfig(_config);
+
+                    _wellness.SetMutedForDate(_tracker.CurrentDate, dlg.MuteToday);
+                }
+            }
+        }
+
+        private WeeklyFatigueContext GetOrLoadWeeklyContext(DateTime today)
+        {
+            string key = today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            if (_cachedWeeklyContext != null && _cachedWeeklyContextDate == key)
+            {
+                return _cachedWeeklyContext;
+            }
+
+            DateTime bankStart;
+            if (!DateTime.TryParseExact(_config.BankStartDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out bankStart))
+            {
+                bankStart = new DateTime(2026, 11, 23);
+            }
+
+            System.Collections.Generic.List<DailyRecord> daily = _storage.LoadDailyRecords();
+            System.Collections.Generic.Dictionary<string, DayOverrideRecord> overrides = _storage.LoadDayOverrides();
+            System.Collections.Generic.Dictionary<string, int> credited = _storage.LoadCreditedAbsenceSecondsByDate(today.AddDays(-21), today);
+
+            _cachedWeeklyContext = PatternRadarCalculator.GetWeeklyFatigueContext(today, daily, credited, overrides, bankStart);
+            _cachedWeeklyContextDate = key;
+            return _cachedWeeklyContext;
         }
 
         private void ToggleMeetingMode()
@@ -597,11 +649,43 @@ namespace RelogioAcompanhamento
 
             if (_tracker.State == TrackerState.Working && !_tracker.PersonalUseMode)
             {
-                AlertNotification alert = _alerts.Evaluate(_tracker.CurrentDate, totalSec);
+                DateTime now = DateTime.Now;
+                WeeklyFatigueContext wCtx = (_config.Profile == WorkProfile.Clt8h && !_demoMode)
+                    ? GetOrLoadWeeklyContext(now.Date)
+                    : null;
+                string preHint = PatternRadarCalculator.BuildPreRegularContextHint(wCtx);
+
+                AlertNotification alert = _alerts.Evaluate(_tracker.CurrentDate, totalSec, _config.PreRegularAlertEnabled, preHint);
                 if (alert != null)
                 {
                     ShowAlert(alert);
                 }
+
+                AlertNotification fatigue = _wellness.EvaluateFatigue(
+                    now,
+                    _tracker.CurrentDate,
+                    _tracker.State,
+                    _tracker.PersonalUseMode,
+                    _tracker.InMeetingMode,
+                    totalSec,
+                    wCtx,
+                    _config);
+                if (fatigue != null)
+                {
+                    ShowAlert(fatigue);
+                }
+            }
+
+            AlertNotification wellnessAlert = _wellness.Tick(
+                DateTime.Now,
+                _tracker.CurrentDate,
+                _tracker.State,
+                _tracker.PersonalUseMode,
+                _tracker.InMeetingMode,
+                _config);
+            if (wellnessAlert != null)
+            {
+                ShowAlert(wellnessAlert);
             }
 
             UpdateTrayStatus(totalSec, level);

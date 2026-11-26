@@ -48,7 +48,10 @@ Aplicativo desktop ultraleve para Windows que acompanha as horas efetivamente tr
     - **Ciclo Semestral (6 meses, zera e recomeça)**: **Ciclo 1** (`11/01` a `10/07`) e **Ciclo 2** (`11/07` a `10/01`)
   - **Tolerância diária de ±15 minutos (padrão CLT)**: diferenças de até 15 min ficam zeradas; acima de 15 min conta a diferença inteira.
   - **Dias úteis sem registro** (Seg–Sex): descontam `-08:00` e ficam sinalizados em destaque para você apontar o motivo com 1 clique (*Feriado*, *Atestado*, *Abonado Total*, *Abonado Parcial 4h*, *Imprensado Abonado ou -8h*, *Desconto Confirmado / Folga BH*, *Esqueci de abrir o app* informando horas trabalhadas, ou *Outra Situação*).
-  - **Dia atual (em andamento)**: exibido em faixa separada para não distorcer o saldo fechado durante o expediente, com resumo do saldo sinalizado ao encerrar o dia.
+  - **Radar de Padrões & Simulador de Fechamento (100% C# puro)**: painel integrado na aba *Banco de Horas* (ativado automaticamente a partir de 10 dias úteis registrados) que calcula perfil por dia da semana (mediana de entrada/saída, Média Móvel Exponencial de saldo e volatilidade), projeta o fechamento do ciclo em 3 cenários (*Realista*, *Conservador* e *Meta semanal para zerar*, já descontando feriados cadastrados) e sugere os dias mais estáveis da semana para compensar horas.
+- **Bem-Estar e Lembretes Contextuais** *(menu → Bem-Estar e Lembretes...)*:
+  - Lembrete periódico de hidratação/alongamento (`30`, `45` ou `60 min`) contado **apenas em tempo ativo**, zerando sozinho após qualquer pausa ou bloqueio ≥ 5 min e segurando avisos durante o **Modo Reunião** e **Uso Pessoal** (com opção de silenciar pelo resto do dia).
+  - **Alertas preventivos de fadiga** (após `19h30`, 2+ dias seguidos de hora extra ou 2+ dias saindo após `20h`) e **aviso de 07h45 enriquecido** com o saldo acumulado da semana.
 - **Pausa manual e início opcional**:
   - Botão `⏸ / ▶` direto no widget (e no menu da bandeja) para saídas rápidas sem bloquear o PC. Não pausa por mouse parado (ideal para reuniões, palestras e treinamentos).
   - No menu de clique direito, você pode marcar/desmarcar **Iniciar Contagem ao Abrir** (se desmarcar, o app abre pausado esperando você clicar em `▶`).

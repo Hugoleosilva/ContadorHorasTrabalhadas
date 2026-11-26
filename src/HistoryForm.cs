@@ -39,6 +39,10 @@ namespace RelogioAcompanhamento
         private readonly Label _lblBankCycleComp;
         private readonly ComboBox _cmbBankScope;
         private readonly DataGridView _gridBank;
+        private readonly Label _lblRadarTitle;
+        private readonly Label _lblRadarBody;
+        private readonly Button _btnRadarDetails;
+        private CycleSimulationResult _lastSimulation;
         private string _lastBankSignature;
 
         public event EventHandler DataModified;
@@ -287,9 +291,61 @@ namespace RelogioAcompanhamento
             _gridBank.Columns["Situacao"].FillWeight = 180;
             _gridBank.CellDoubleClick += delegate { OpenClassifySelectedDayDialog(); };
 
+            // Painel compacto Radar de Padrões & Simulador de Fechamento no rodapé da aba BH
+            Panel radarPanel = new Panel();
+            radarPanel.Dock = DockStyle.Bottom;
+            radarPanel.Height = (int)Math.Round(64 * dpiScale);
+            radarPanel.BackColor = Color.FromArgb(30, 34, 43);
+            radarPanel.Padding = new Padding(
+                (int)Math.Round(10 * dpiScale),
+                (int)Math.Round(6 * dpiScale),
+                (int)Math.Round(10 * dpiScale),
+                (int)Math.Round(6 * dpiScale));
+
+            _btnRadarDetails = CreateActionButton("Ver Perfil Semanal...", (int)Math.Round(150 * dpiScale));
+            _btnRadarDetails.Dock = DockStyle.Right;
+            _btnRadarDetails.FlatAppearance.BorderColor = Color.FromArgb(56, 189, 248);
+            _btnRadarDetails.Visible = false;
+            _btnRadarDetails.Click += delegate
+            {
+                if (_lastSimulation != null && _lastSimulation.HasEnoughData)
+                {
+                    using (RadarDetailsForm dlg = new RadarDetailsForm(_lastSimulation))
+                    {
+                        dlg.ShowDialog(this);
+                    }
+                }
+            };
+
+            Panel radarTextWrap = new Panel();
+            radarTextWrap.Dock = DockStyle.Fill;
+            radarTextWrap.Padding = new Padding(0, 0, (int)Math.Round(10 * dpiScale), 0);
+
+            _lblRadarTitle = new Label();
+            _lblRadarTitle.Text = "RADAR DE PADRÕES & SIMULADOR DE FECHAMENTO";
+            _lblRadarTitle.Dock = DockStyle.Top;
+            _lblRadarTitle.Height = (int)Math.Round(17 * dpiScale);
+            _lblRadarTitle.Font = new Font("Segoe UI", 7.5f, FontStyle.Bold);
+            _lblRadarTitle.ForeColor = Color.FromArgb(56, 189, 248);
+
+            _lblRadarBody = new Label();
+            _lblRadarBody.Text = "Coletando histórico (0/10 dias úteis registrados)...";
+            _lblRadarBody.Dock = DockStyle.Fill;
+            _lblRadarBody.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
+            _lblRadarBody.ForeColor = Color.FromArgb(203, 213, 225);
+            _lblRadarBody.TextAlign = ContentAlignment.MiddleLeft;
+            _lblRadarBody.AutoEllipsis = true;
+
+            radarTextWrap.Controls.Add(_lblRadarBody);
+            radarTextWrap.Controls.Add(_lblRadarTitle);
+
+            radarPanel.Controls.Add(radarTextWrap);
+            radarPanel.Controls.Add(_btnRadarDetails);
+
             _bankContentPanel.Controls.Add(_gridBank);
             _bankContentPanel.Controls.Add(bankToolbar);
             _bankContentPanel.Controls.Add(bankCardsPanel);
+            _bankContentPanel.Controls.Add(radarPanel);
 
             tabBank.Controls.Add(_bankContentPanel);
             tabBank.Controls.Add(_lblBankDisabledNotice);
@@ -693,6 +749,38 @@ namespace RelogioAcompanhamento
                 return;
             }
             _lastBankSignature = sig;
+
+            // Atualiza Radar de Padrões & Simulador de Fechamento (C# puro)
+            _lastSimulation = PatternRadarCalculator.Analyze(
+                now.Date,
+                savedDaily,
+                creditedMap,
+                overrides,
+                bankStart,
+                snap.Cycle.BalanceSeconds);
+
+            if (_lastSimulation.HasEnoughData)
+            {
+                _lblRadarTitle.Text = string.Format(
+                    "RADAR & SIMULADOR ({0} DIAS) — REALISTA: {1}  |  CONSERVADOR: {2}  |  RESTAM {3} DIAS ÚTEIS",
+                    _lastSimulation.RecordedDaysCount,
+                    TimeFormat.FormatSignedHms(_lastSimulation.RealisticProjectedBalanceSeconds),
+                    TimeFormat.FormatSignedHms(_lastSimulation.ConservativeProjectedBalanceSeconds),
+                    _lastSimulation.RemainingWeekdays);
+                _lblRadarBody.Text = _lastSimulation.RecommendationText;
+                _lblRadarBody.ForeColor = Color.FromArgb(226, 232, 240);
+                _btnRadarDetails.Visible = true;
+            }
+            else
+            {
+                _lblRadarTitle.Text = string.Format(
+                    "RADAR & SIMULADOR DE FECHAMENTO — COLETANDO HISTÓRICO ({0}/{1} DIAS ÚTEIS)",
+                    _lastSimulation.RecordedDaysCount,
+                    _lastSimulation.MinRequiredDays);
+                _lblRadarBody.Text = _lastSimulation.RecommendationText;
+                _lblRadarBody.ForeColor = Color.FromArgb(148, 163, 184);
+                _btnRadarDetails.Visible = false;
+            }
 
             int selBankIdx = _gridBank.SelectedRows.Count > 0 ? _gridBank.SelectedRows[0].Index : -1;
             _gridBank.Rows.Clear();

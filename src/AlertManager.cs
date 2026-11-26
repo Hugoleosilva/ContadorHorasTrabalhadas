@@ -63,6 +63,11 @@ namespace RelogioAcompanhamento
 
         public AlertNotification Evaluate(string workDate, int totalWorkedSeconds)
         {
+            return Evaluate(workDate, totalWorkedSeconds, true, string.Empty);
+        }
+
+        public AlertNotification Evaluate(string workDate, int totalWorkedSeconds, bool preRegularAlertEnabled, string weeklyContextHint)
+        {
             if (_flags.WorkDate != workDate)
             {
                 _flags = _storage.LoadAlertFlags(workDate);
@@ -126,7 +131,7 @@ namespace RelogioAcompanhamento
                     false,
                     AlertLevel.Overtime);
             }
-            else if (_preAlertSeconds > 0 && totalWorkedSeconds >= preRegular && !_flags.PreRegularSent)
+            else if (preRegularAlertEnabled && _preAlertSeconds > 0 && totalWorkedSeconds >= preRegular && !_flags.PreRegularSent)
             {
                 _flags.PreRegularSent = true;
                 changed = true;
@@ -134,12 +139,16 @@ namespace RelogioAcompanhamento
                 string suffix = _overtimeLimitSeconds > 0
                     ? " trabalhadas."
                     : " (Estagiário — limite sem horas extras).";
+                string contextExtra = (_overtimeLimitSeconds > 0 && !string.IsNullOrEmpty(weeklyContextHint))
+                    ? weeklyContextHint
+                    : string.Empty;
                 notification = new AlertNotification(
                     "Fim da jornada se aproximando",
-                    string.Format("Faltam cerca de {0} min para completar {1}{2}",
+                    string.Format("Faltam cerca de {0} min para completar {1}{2}{3}",
                         remainingMinutes,
                         TimeFormat.FormatHm(_regularLimitSeconds),
-                        suffix),
+                        suffix,
+                        contextExtra),
                     false,
                     AlertLevel.PreRegular);
             }
