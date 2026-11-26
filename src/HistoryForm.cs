@@ -37,9 +37,9 @@ namespace RelogioAcompanhamento
         private readonly Label _lblBankCycleTitle;
         private readonly Label _lblBankCycleBalance;
         private readonly Label _lblBankCycleComp;
-        private readonly Label _lblBankTodayStrip;
         private readonly ComboBox _cmbBankScope;
         private readonly DataGridView _gridBank;
+        private string _lastBankSignature;
 
         public event EventHandler DataModified;
 
@@ -237,21 +237,6 @@ namespace RelogioAcompanhamento
             CreateBankCard(bankCardsLayout, 2, "CICLO 6 MESES", dpiScale, out _lblBankCycleTitle, out _lblBankCycleBalance, out _lblBankCycleComp);
             bankCardsPanel.Controls.Add(bankCardsLayout);
 
-            // Faixa de projeção do dia de hoje (em andamento)
-            Panel bankTodayPanel = new Panel();
-            bankTodayPanel.Dock = DockStyle.Top;
-            bankTodayPanel.Height = (int)Math.Round(30 * dpiScale);
-            bankTodayPanel.BackColor = Color.FromArgb(30, 34, 43);
-            bankTodayPanel.Padding = new Padding((int)Math.Round(10 * dpiScale), 0, (int)Math.Round(10 * dpiScale), 0);
-
-            _lblBankTodayStrip = new Label();
-            _lblBankTodayStrip.Dock = DockStyle.Fill;
-            _lblBankTodayStrip.TextAlign = ContentAlignment.MiddleLeft;
-            _lblBankTodayStrip.ForeColor = Color.FromArgb(203, 213, 225);
-            _lblBankTodayStrip.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
-            _lblBankTodayStrip.AutoEllipsis = true;
-            bankTodayPanel.Controls.Add(_lblBankTodayStrip);
-
             // Barra de ferramentas do BH
             Panel bankToolbar = new Panel();
             bankToolbar.Dock = DockStyle.Top;
@@ -276,7 +261,7 @@ namespace RelogioAcompanhamento
             _cmbBankScope.Items.Add("Exibir: Mês Atual (11–10)");
             _cmbBankScope.Items.Add("Exibir: Ciclo Completo (6m)");
             _cmbBankScope.SelectedIndex = 0;
-            _cmbBankScope.SelectedIndexChanged += delegate { RefreshData(); };
+            _cmbBankScope.SelectedIndexChanged += delegate { _lastBankSignature = null; RefreshData(); };
 
             Label lblBankHint = new Label();
             lblBankHint.Text = "Tolerância ±15 min (CLT) • Duplo clique no dia para apontar feriado, atestado, imprensado ou esquecimento";
@@ -304,7 +289,6 @@ namespace RelogioAcompanhamento
 
             _bankContentPanel.Controls.Add(_gridBank);
             _bankContentPanel.Controls.Add(bankToolbar);
-            _bankContentPanel.Controls.Add(bankTodayPanel);
             _bankContentPanel.Controls.Add(bankCardsPanel);
 
             tabBank.Controls.Add(_bankContentPanel);
@@ -348,7 +332,7 @@ namespace RelogioAcompanhamento
 
             Button btnRefresh = CreateActionButton("Atualizar", (int)Math.Round(95 * dpiScale));
             btnRefresh.Dock = DockStyle.Right;
-            btnRefresh.Click += delegate { RefreshData(); };
+            btnRefresh.Click += delegate { _lastBankSignature = null; RefreshData(); };
 
             footerPanel.Controls.Add(btnOpenFolder);
             footerPanel.Controls.Add(spacer1);
@@ -499,6 +483,7 @@ namespace RelogioAcompanhamento
                     {
                         _storage.UpsertDayOverride(dlg.ResultRecord);
                     }
+                    _lastBankSignature = null;
                     RefreshData();
                     RaiseDataModified();
                 }
@@ -693,66 +678,24 @@ namespace RelogioAcompanhamento
             UpdateBankCard(_lblBankMonthTitle, _lblBankMonthBalance, _lblBankMonthComp, "MENSAL (" + snap.Month.PeriodTitle + ")", snap.Month);
             UpdateBankCard(_lblBankCycleTitle, _lblBankCycleBalance, _lblBankCycleComp, snap.Cycle.PeriodTitle.ToUpperInvariant(), snap.Cycle);
 
-            if (snap.TodayEntry != null)
-            {
-                int effToday = Math.Max(
-                    snap.TodayEntry.WorkedSeconds,
-                    Math.Min(HourBankCalculator.DailyTargetSeconds, snap.TodayEntry.WorkedSeconds + snap.TodayEntry.CreditedSeconds));
-                int remaining = Math.Max(0, HourBankCalculator.DailyTargetSeconds - effToday);
-
-                string pendingWarn = snap.Cycle.PendingDaysCount > 0
-                    ? string.Format("  |  ATENÇÃO: {0} dia(s) sem registro", snap.Cycle.PendingDaysCount)
-                    : string.Empty;
-
-                if (remaining > 0)
-                {
-                    _lblBankTodayStrip.Text = string.Format(
-                        "Hoje ({0:dd/MM} — em andamento): {1} trab. + {2} abon.  |  Faltam {3} p/ 8h (tolerância ±15m){4}",
-                        snap.TodayEntry.Date,
-                        TimeFormat.FormatHms(snap.TodayEntry.WorkedSeconds),
-                        TimeFormat.FormatHms(snap.TodayEntry.CreditedSeconds),
-                        TimeFormat.FormatHms(remaining),
-                        pendingWarn);
-                }
-                else
-                {
-                    _lblBankTodayStrip.Text = string.Format(
-                        "Hoje ({0:dd/MM} — em andamento): {1} trab. + {2} abon.  |  Saldo provisório ao encerrar: {3}{4}",
-                        snap.TodayEntry.Date,
-                        TimeFormat.FormatHms(snap.TodayEntry.WorkedSeconds),
-                        TimeFormat.FormatHms(snap.TodayEntry.CreditedSeconds),
-                        TimeFormat.FormatSignedHms(snap.TodayEntry.BalanceSeconds),
-                        pendingWarn);
-                }
-                _lblBankTodayStrip.ForeColor = snap.Cycle.PendingDaysCount > 0
-                    ? Color.FromArgb(250, 204, 21)
-                    : Color.FromArgb(203, 213, 225);
-            }
-            else
-            {
-                _lblBankTodayStrip.Text = "Hoje é fim de semana (Banco de Horas contabiliza apenas segunda a sexta).";
-                _lblBankTodayStrip.ForeColor = Color.FromArgb(148, 163, 184);
-            }
-
-            // Preenche grade preservando seleção
-            int selBankIdx = _gridBank.SelectedRows.Count > 0 ? _gridBank.SelectedRows[0].Index : -1;
-            _gridBank.Rows.Clear();
-
             bool monthOnly = (_cmbBankScope.SelectedIndex == 0);
 
-            // Mostra hoje no topo como referência em andamento (se dia útil)
-            if (snap.TodayEntry != null)
+            // Evita piscar a tabela a cada segundo: só recarrega quando os dias encerrados mudarem
+            string sig = string.Format("{0}|{1}|{2}|{3}|{4}",
+                monthOnly,
+                snap.CycleDays.Count,
+                snap.Week.BalanceSeconds,
+                snap.Month.BalanceSeconds,
+                snap.Cycle.BalanceSeconds);
+
+            if (sig == _lastBankSignature && _gridBank.Rows.Count > 0)
             {
-                int rIdx = _gridBank.Rows.Add(
-                    snap.TodayEntry.WorkDate + " (Hoje)",
-                    snap.TodayEntry.DayOfWeekShort,
-                    TimeFormat.FormatHms(snap.TodayEntry.WorkedSeconds),
-                    TimeFormat.FormatHms(snap.TodayEntry.CreditedSeconds),
-                    "Em andamento",
-                    snap.TodayEntry.StatusText);
-                _gridBank.Rows[rIdx].Tag = snap.TodayEntry.Date;
-                _gridBank.Rows[rIdx].Cells["Saldo"].Style.ForeColor = Color.FromArgb(56, 189, 248);
+                return;
             }
+            _lastBankSignature = sig;
+
+            int selBankIdx = _gridBank.SelectedRows.Count > 0 ? _gridBank.SelectedRows[0].Index : -1;
+            _gridBank.Rows.Clear();
 
             foreach (HourBankDayEntry item in snap.CycleDays)
             {
