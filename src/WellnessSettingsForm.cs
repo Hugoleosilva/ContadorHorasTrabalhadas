@@ -41,8 +41,8 @@ namespace RelogioAcompanhamento
             ForeColor = Color.FromArgb(241, 245, 249);
             Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
 
-            int pad = (int)Math.Round(16 * dpiScale);
-            int width = (int)Math.Round(460 * dpiScale);
+            int pad = (int)Math.Round(18 * dpiScale);
+            int width = (int)Math.Round(520 * dpiScale);
             int y = pad;
 
             Label lblHeader = new Label();
@@ -83,6 +83,7 @@ namespace RelogioAcompanhamento
             _cmbInterval.Enabled = _chkWellnessEnabled.Checked;
             _chkWellnessEnabled.CheckedChanged += delegate { _cmbInterval.Enabled = _chkWellnessEnabled.Checked; };
             Controls.Add(_cmbInterval);
+            _cmbInterval.BringToFront();
             y += (int)Math.Round(34 * dpiScale);
 
             Label lblResetHint = new Label();
