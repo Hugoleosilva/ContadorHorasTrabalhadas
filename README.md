@@ -32,12 +32,23 @@ Aplicativo desktop ultraleve para Windows que acompanha as horas efetivamente tr
 
 ## Recursos
 
+- **Pergunta ao abrir (Trabalho vs. Uso Pessoal / Hobby / Curso)**:
+  - Ao iniciar, o aplicativo pergunta se você está começando o expediente ou acessando para uso pessoal (estudos, hobby, curso, fim de semana). No **Modo Uso Pessoal**, nenhuma hora trabalhada ou ausência é gerada — e você pode alternar para trabalho a qualquer momento.
 - **Contagem real e Modo Reunião**:
   - Congela automaticamente ao bloquear a tela (`Win + L` ou bloqueio automático do Windows), deslogar, suspender/hibernar ou desligar, e retoma ao voltar.
   - **Modo Reunião (não pausar no bloqueio)**: ao ativar no menu de clique direito, você pode bloquear a tela para ir a uma sala de reunião sem congelar a contagem e sem registrar ausência.
-- **Registro de Ausências e Intervalos (sem alterar horas trabalhadas)**:
+- **Registro de Ausências e Intervalos (com sobrescrita automática)**:
   - Registra automaticamente o tempo ausente em bloqueios de tela e pausas rápidas, além de permitir **Pausar como Ausência** (*Intervalo / Almoço*, *Ida ao Médico*, *Pausa Rápida*, *Outra Ausência*) ou **Lançar Ausência Manual** com horário de início/fim e observação.
-  - Permite **reclassificar** qualquer ausência (ex.: transformar um *Bloqueio de Tela* em *Intervalo / Almoço* ou *Ida ao Médico*) e exibe o **total de ausências do dia** somado por categoria na aba **Ausências / Intervalos** e na coluna `TotalAusencias` do CSV diário.
+  - Ao lançar uma ausência manual num período (ex.: `08:00–11:50`), qualquer bloqueio de tela ou sessão registrada dentro daquele intervalo é **sobrescrita automaticamente** para refletir a jornada real.
+  - **Ida ao Médico** já vem marcada como **Abona BH** por padrão (ausência legal que não desconta no Banco de Horas).
+- **Banco de Horas (Semanal, Mensal e Semestral — jornada 8h CLT)**:
+  - Nova aba **Banco de Horas** exibindo **Saldo** e **A compensar** para:
+    - **Semanal** (segunda a sexta)
+    - **Mensal (Competência)**: corte do **dia 11 ao dia 10** do mês seguinte (ex.: `11/11` a `10/12`, iniciando em `23/11/2026`)
+    - **Ciclo Semestral (6 meses, zera e recomeça)**: **Ciclo 1** (`11/01` a `10/07`) e **Ciclo 2** (`11/07` a `10/01`)
+  - **Tolerância diária de ±15 minutos (padrão CLT)**: diferenças de até 15 min ficam zeradas; acima de 15 min conta a diferença inteira.
+  - **Dias úteis sem registro** (Seg–Sex): descontam `-08:00` e ficam sinalizados em destaque para você apontar o motivo com 1 clique (*Feriado*, *Atestado*, *Abonado Total*, *Abonado Parcial 4h*, *Imprensado Abonado ou -8h*, *Desconto Confirmado / Folga BH*, *Esqueci de abrir o app* informando horas trabalhadas, ou *Outra Situação*).
+  - **Dia atual (em andamento)**: exibido em faixa separada para não distorcer o saldo fechado durante o expediente, com resumo do saldo sinalizado ao encerrar o dia.
 - **Pausa manual e início opcional**:
   - Botão `⏸ / ▶` direto no widget (e no menu da bandeja) para saídas rápidas sem bloquear o PC. Não pausa por mouse parado (ideal para reuniões, palestras e treinamentos).
   - No menu de clique direito, você pode marcar/desmarcar **Iniciar Contagem ao Abrir** (se desmarcar, o app abre pausado esperando você clicar em `▶`).
@@ -54,8 +65,9 @@ Aplicativo desktop ultraleve para Windows que acompanha as horas efetivamente tr
 - **Registros em CSV simples** (salvos em `%LOCALAPPDATA%\RelogioAcompanhamento\`):
   - `registros_diarios.csv` — resumo de cada dia com horas trabalhadas, extras e total de ausências (abre direto no Excel)
   - `sessoes_YYYY-MM.csv` — detalhamento de todos os intervalos trabalhados do mês
-  - `ausencias_YYYY-MM.csv` — histórico detalhado de intervalos, idas ao médico, pausas e bloqueios de tela
-  - `config.ini` — perfil de jornada, tamanho, posição e preferências
+  - `ausencias_YYYY-MM.csv` — histórico detalhado de intervalos, idas ao médico (com coluna `Abonado`), pausas e bloqueios de tela
+  - `dias_especiais.csv` — apontamentos do Banco de Horas (feriados, atestados, abonos, imprensados, esquecimentos)
+  - `config.ini` — perfil de jornada, data inicial do BH, tamanho, posição e preferências
 
 ## Tecnologias utilizadas e o porquê
 

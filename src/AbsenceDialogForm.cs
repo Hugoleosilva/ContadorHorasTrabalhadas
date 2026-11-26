@@ -10,14 +10,17 @@ namespace RelogioAcompanhamento
         private readonly DateTimePicker _dtpStart;
         private readonly DateTimePicker _dtpEnd;
         private readonly Label _lblDuration;
+        private readonly CheckBox _chkCredited;
         private readonly TextBox _txtNote;
         private readonly bool _editTypeOnly;
         private readonly bool _quickNoteOnly;
+        private bool _userToggledCredit;
 
         public string SelectedType { get; private set; }
         public DateTime SelectedStart { get; private set; }
         public DateTime SelectedEnd { get; private set; }
         public string EnteredNote { get; private set; }
+        public bool SelectedCredited { get; private set; }
 
         private static readonly string[] TypeCodes = new string[]
         {
@@ -43,11 +46,13 @@ namespace RelogioAcompanhamento
             DateTime initialStart,
             DateTime initialEnd,
             string initialNote,
+            bool initialCredited,
             bool editTypeOnly,
             bool quickNoteOnly)
         {
             _editTypeOnly = editTypeOnly;
             _quickNoteOnly = quickNoteOnly;
+            _userToggledCredit = false;
 
             float dpiScale = 1.0f;
             using (Graphics g = CreateGraphics())
@@ -67,7 +72,7 @@ namespace RelogioAcompanhamento
             Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
 
             int pad = (int)Math.Round(16 * dpiScale);
-            int width = (int)Math.Round(390 * dpiScale);
+            int width = (int)Math.Round(410 * dpiScale);
             int fieldWidth = width - (pad * 2);
             int y = pad;
 
@@ -149,10 +154,41 @@ namespace RelogioAcompanhamento
                 _lblDuration.ForeColor = Color.FromArgb(192, 132, 252);
                 _lblDuration.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
                 Controls.Add(_lblDuration);
-                y += (int)Math.Round(26 * dpiScale);
+                y += (int)Math.Round(24 * dpiScale);
+
+                Label lblOverwriteInfo = new Label();
+                lblOverwriteInfo.Text = "Obs.: bloqueios e sessões dentro deste período serão sobrescritos automaticamente.";
+                lblOverwriteInfo.Location = new Point(pad, y);
+                lblOverwriteInfo.Size = new Size(fieldWidth, (int)Math.Round(28 * dpiScale));
+                lblOverwriteInfo.ForeColor = Color.FromArgb(148, 163, 184);
+                lblOverwriteInfo.Font = new Font("Segoe UI", 8f, FontStyle.Italic);
+                Controls.Add(lblOverwriteInfo);
+                y += (int)Math.Round(30 * dpiScale);
 
                 UpdateDurationPreview();
             }
+
+            _chkCredited = new CheckBox();
+            _chkCredited.Text = "Abonar no Banco de Horas (ausência legal — não desconta BH)";
+            _chkCredited.Location = new Point(pad, y);
+            _chkCredited.AutoSize = true;
+            _chkCredited.ForeColor = Color.FromArgb(134, 239, 172);
+            _chkCredited.Checked = initialCredited;
+            _chkCredited.Click += delegate { _userToggledCredit = true; };
+            Controls.Add(_chkCredited);
+            y += (int)Math.Round(28 * dpiScale);
+
+            _cmbType.SelectedIndexChanged += delegate
+            {
+                if (!_userToggledCredit)
+                {
+                    int idx = _cmbType.SelectedIndex;
+                    if (idx >= 0 && idx < TypeCodes.Length)
+                    {
+                        _chkCredited.Checked = AbsenceTypes.IsCreditedByDefault(TypeCodes[idx]);
+                    }
+                }
+            };
 
             Label lblNote = new Label();
             lblNote.Text = "Observação (opcional):";
@@ -229,6 +265,7 @@ namespace RelogioAcompanhamento
             if (idx < 0 || idx >= TypeCodes.Length) idx = 0;
             SelectedType = TypeCodes[idx];
             EnteredNote = _txtNote.Text.Trim();
+            SelectedCredited = _chkCredited.Checked;
 
             if (!_editTypeOnly && !_quickNoteOnly)
             {

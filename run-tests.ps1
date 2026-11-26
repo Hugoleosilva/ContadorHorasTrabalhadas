@@ -20,6 +20,7 @@ $argsList = @(
     '/reference:System.dll',
     (Join-Path $srcDir 'Models.cs'),
     (Join-Path $srcDir 'CsvStorage.cs'),
+    (Join-Path $srcDir 'HourBankCalculator.cs'),
     (Join-Path $srcDir 'TimeTracker.cs'),
     (Join-Path $srcDir 'AlertManager.cs'),
     $testFile

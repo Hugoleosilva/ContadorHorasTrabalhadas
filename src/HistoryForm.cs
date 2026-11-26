@@ -12,6 +12,7 @@ namespace RelogioAcompanhamento
     {
         private readonly TimeTracker _tracker;
         private readonly CsvStorage _storage;
+        private readonly AppConfig _config;
 
         private readonly Label _lblTodayTotal;
         private readonly Label _lblTodayRegular;
@@ -24,12 +25,29 @@ namespace RelogioAcompanhamento
         private readonly DataGridView _gridAbsences;
         private readonly DataGridView _gridDaily;
 
+        // Aba Banco de Horas
+        private readonly Panel _bankContentPanel;
+        private readonly Label _lblBankDisabledNotice;
+        private readonly Label _lblBankWeekTitle;
+        private readonly Label _lblBankWeekBalance;
+        private readonly Label _lblBankWeekComp;
+        private readonly Label _lblBankMonthTitle;
+        private readonly Label _lblBankMonthBalance;
+        private readonly Label _lblBankMonthComp;
+        private readonly Label _lblBankCycleTitle;
+        private readonly Label _lblBankCycleBalance;
+        private readonly Label _lblBankCycleComp;
+        private readonly Label _lblBankTodayStrip;
+        private readonly ComboBox _cmbBankScope;
+        private readonly DataGridView _gridBank;
+
         public event EventHandler DataModified;
 
-        public HistoryForm(TimeTracker tracker, CsvStorage storage)
+        public HistoryForm(TimeTracker tracker, CsvStorage storage, AppConfig config)
         {
             _tracker = tracker;
             _storage = storage;
+            _config = config;
 
             float dpiScale = 1.0f;
             using (Graphics g = CreateGraphics())
@@ -39,9 +57,9 @@ namespace RelogioAcompanhamento
 
             SuspendLayout();
 
-            Text = "Relógio Acompanhamento — Registros, Ausências e Histórico";
-            ClientSize = new Size((int)Math.Round(780 * dpiScale), (int)Math.Round(500 * dpiScale));
-            MinimumSize = new Size((int)Math.Round(660 * dpiScale), (int)Math.Round(420 * dpiScale));
+            Text = "Relógio Acompanhamento — Registros, Ausências e Banco de Horas";
+            ClientSize = new Size((int)Math.Round(840 * dpiScale), (int)Math.Round(540 * dpiScale));
+            MinimumSize = new Size((int)Math.Round(700 * dpiScale), (int)Math.Round(450 * dpiScale));
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = Color.FromArgb(24, 26, 32);
             ForeColor = Color.FromArgb(241, 245, 249);
@@ -76,7 +94,7 @@ namespace RelogioAcompanhamento
 
             headerPanel.Controls.Add(summaryLayout);
 
-            // Abas: Sessões de Hoje | Ausências / Intervalos | Registros Diários
+            // Abas: Sessões de Hoje | Ausências / Intervalos | Registros Diários | Banco de Horas
             TabControl tabs = new TabControl();
             tabs.Dock = DockStyle.Fill;
             tabs.Padding = new Point(12, 6);
@@ -112,7 +130,7 @@ namespace RelogioAcompanhamento
             absSp1.Dock = DockStyle.Left;
             absSp1.Width = (int)Math.Round(8 * dpiScale);
 
-            Button btnEditAbsence = CreateActionButton("Justificar / Editar", (int)Math.Round(150 * dpiScale));
+            Button btnEditAbsence = CreateActionButton("Justificar / Editar", (int)Math.Round(145 * dpiScale));
             btnEditAbsence.Dock = DockStyle.Left;
             btnEditAbsence.Click += delegate { OpenEditSelectedAbsenceDialog(); };
 
@@ -125,7 +143,7 @@ namespace RelogioAcompanhamento
             btnDeleteAbsence.Click += delegate { DeleteSelectedAbsence(); };
 
             Label lblInlineHint = new Label();
-            lblInlineHint.Text = "Dica: dê duplo clique em um Bloqueio de Tela para justificar direto na linha";
+            lblInlineHint.Text = "Duplo clique para justificar • Lançar ausência sobrescreve bloqueios/sessões no período";
             lblInlineHint.Dock = DockStyle.Fill;
             lblInlineHint.TextAlign = ContentAlignment.MiddleRight;
             lblInlineHint.ForeColor = Color.FromArgb(148, 163, 184);
@@ -157,7 +175,9 @@ namespace RelogioAcompanhamento
             _gridAbsences.Columns.Add("Fim", "Fim");
             _gridAbsences.Columns.Add("Duracao", "Duração");
             _gridAbsences.Columns.Add("Tipo", "Tipo");
+            _gridAbsences.Columns.Add("Abonado", "Abona BH");
             _gridAbsences.Columns.Add("Observacao", "Observação");
+            _gridAbsences.Columns["Abonado"].FillWeight = 60;
             _gridAbsences.CellDoubleClick += delegate { OpenEditSelectedAbsenceDialog(); };
 
             tabAbsences.Controls.Add(_gridAbsences);
@@ -180,9 +200,120 @@ namespace RelogioAcompanhamento
             _gridDaily.Columns.Add("Status", "Status Limite");
             tabDaily.Controls.Add(_gridDaily);
 
+            // Aba 4: Banco de Horas (Semanal / Mensal 11-10 / Ciclo 6 meses)
+            TabPage tabBank = new TabPage("Banco de Horas");
+            tabBank.BackColor = Color.FromArgb(24, 26, 32);
+            tabBank.Padding = new Padding(8);
+
+            _lblBankDisabledNotice = new Label();
+            _lblBankDisabledNotice.Dock = DockStyle.Fill;
+            _lblBankDisabledNotice.TextAlign = ContentAlignment.MiddleCenter;
+            _lblBankDisabledNotice.ForeColor = Color.FromArgb(148, 163, 184);
+            _lblBankDisabledNotice.Font = new Font("Segoe UI", 10.5f, FontStyle.Regular);
+            _lblBankDisabledNotice.Text = "O Banco de Horas está disponível apenas para a jornada padrão de 8h diárias (CLT).\nNo perfil Estagiário (6h), não há banco de horas nem horas extras.";
+            _lblBankDisabledNotice.Visible = false;
+
+            _bankContentPanel = new Panel();
+            _bankContentPanel.Dock = DockStyle.Fill;
+
+            // Cards de Saldo: Semanal | Mensal (11-10) | Ciclo 6 Meses
+            Panel bankCardsPanel = new Panel();
+            bankCardsPanel.Dock = DockStyle.Top;
+            bankCardsPanel.Height = (int)Math.Round(94 * dpiScale);
+            bankCardsPanel.Padding = new Padding(0, 0, 0, (int)Math.Round(6 * dpiScale));
+
+            TableLayoutPanel bankCardsLayout = new TableLayoutPanel();
+            bankCardsLayout.Dock = DockStyle.Fill;
+            bankCardsLayout.ColumnCount = 3;
+            bankCardsLayout.RowCount = 1;
+            bankCardsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            for (int i = 0; i < 3; i++)
+            {
+                bankCardsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
+            }
+
+            CreateBankCard(bankCardsLayout, 0, "SEMANAL (SEG–SEX)", dpiScale, out _lblBankWeekTitle, out _lblBankWeekBalance, out _lblBankWeekComp);
+            CreateBankCard(bankCardsLayout, 1, "MENSAL (11 A 10)", dpiScale, out _lblBankMonthTitle, out _lblBankMonthBalance, out _lblBankMonthComp);
+            CreateBankCard(bankCardsLayout, 2, "CICLO 6 MESES", dpiScale, out _lblBankCycleTitle, out _lblBankCycleBalance, out _lblBankCycleComp);
+            bankCardsPanel.Controls.Add(bankCardsLayout);
+
+            // Faixa de projeção do dia de hoje (em andamento)
+            Panel bankTodayPanel = new Panel();
+            bankTodayPanel.Dock = DockStyle.Top;
+            bankTodayPanel.Height = (int)Math.Round(30 * dpiScale);
+            bankTodayPanel.BackColor = Color.FromArgb(30, 34, 43);
+            bankTodayPanel.Padding = new Padding((int)Math.Round(10 * dpiScale), 0, (int)Math.Round(10 * dpiScale), 0);
+
+            _lblBankTodayStrip = new Label();
+            _lblBankTodayStrip.Dock = DockStyle.Fill;
+            _lblBankTodayStrip.TextAlign = ContentAlignment.MiddleLeft;
+            _lblBankTodayStrip.ForeColor = Color.FromArgb(203, 213, 225);
+            _lblBankTodayStrip.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
+            _lblBankTodayStrip.AutoEllipsis = true;
+            bankTodayPanel.Controls.Add(_lblBankTodayStrip);
+
+            // Barra de ferramentas do BH
+            Panel bankToolbar = new Panel();
+            bankToolbar.Dock = DockStyle.Top;
+            bankToolbar.Height = (int)Math.Round(40 * dpiScale);
+            bankToolbar.Padding = new Padding(0, (int)Math.Round(6 * dpiScale), 0, (int)Math.Round(6 * dpiScale));
+
+            Button btnClassifyDay = CreateActionButton("Apontar / Classificar Dia...", (int)Math.Round(190 * dpiScale));
+            btnClassifyDay.Dock = DockStyle.Left;
+            btnClassifyDay.FlatAppearance.BorderColor = Color.FromArgb(56, 189, 248);
+            btnClassifyDay.Click += delegate { OpenClassifySelectedDayDialog(); };
+
+            Panel bankSp1 = new Panel();
+            bankSp1.Dock = DockStyle.Left;
+            bankSp1.Width = (int)Math.Round(10 * dpiScale);
+
+            _cmbBankScope = new ComboBox();
+            _cmbBankScope.DropDownStyle = ComboBoxStyle.DropDownList;
+            _cmbBankScope.Dock = DockStyle.Left;
+            _cmbBankScope.Width = (int)Math.Round(185 * dpiScale);
+            _cmbBankScope.BackColor = Color.FromArgb(36, 41, 52);
+            _cmbBankScope.ForeColor = Color.FromArgb(248, 250, 252);
+            _cmbBankScope.Items.Add("Exibir: Mês Atual (11–10)");
+            _cmbBankScope.Items.Add("Exibir: Ciclo Completo (6m)");
+            _cmbBankScope.SelectedIndex = 0;
+            _cmbBankScope.SelectedIndexChanged += delegate { RefreshData(); };
+
+            Label lblBankHint = new Label();
+            lblBankHint.Text = "Tolerância ±15 min (CLT) • Duplo clique no dia para apontar feriado, atestado, imprensado ou esquecimento";
+            lblBankHint.Dock = DockStyle.Fill;
+            lblBankHint.TextAlign = ContentAlignment.MiddleRight;
+            lblBankHint.ForeColor = Color.FromArgb(148, 163, 184);
+            lblBankHint.Font = new Font("Segoe UI", 8f, FontStyle.Italic);
+            lblBankHint.AutoEllipsis = true;
+
+            bankToolbar.Controls.Add(lblBankHint);
+            bankToolbar.Controls.Add(_cmbBankScope);
+            bankToolbar.Controls.Add(bankSp1);
+            bankToolbar.Controls.Add(btnClassifyDay);
+
+            _gridBank = CreateStyledGrid();
+            _gridBank.Columns.Add("Data", "Data");
+            _gridBank.Columns.Add("Dia", "Dia");
+            _gridBank.Columns.Add("Trabalhado", "Trabalhado");
+            _gridBank.Columns.Add("Abonado", "Abonado");
+            _gridBank.Columns.Add("Saldo", "Saldo BH");
+            _gridBank.Columns.Add("Situacao", "Situação / Apontamento");
+            _gridBank.Columns["Dia"].FillWeight = 45;
+            _gridBank.Columns["Situacao"].FillWeight = 180;
+            _gridBank.CellDoubleClick += delegate { OpenClassifySelectedDayDialog(); };
+
+            _bankContentPanel.Controls.Add(_gridBank);
+            _bankContentPanel.Controls.Add(bankToolbar);
+            _bankContentPanel.Controls.Add(bankTodayPanel);
+            _bankContentPanel.Controls.Add(bankCardsPanel);
+
+            tabBank.Controls.Add(_bankContentPanel);
+            tabBank.Controls.Add(_lblBankDisabledNotice);
+
             tabs.TabPages.Add(tabToday);
             tabs.TabPages.Add(tabAbsences);
             tabs.TabPages.Add(tabDaily);
+            tabs.TabPages.Add(tabBank);
 
             // Rodapé com botões de ação
             Panel footerPanel = new Panel();
@@ -247,28 +378,18 @@ namespace RelogioAcompanhamento
 
             using (AbsenceDialogForm dlg = new AbsenceDialogForm(
                 "Lançar Ausência / Intervalo",
-                AbsenceTypes.Intervalo,
+                AbsenceTypes.Medico,
                 defaultStart,
                 now,
                 string.Empty,
+                true,
                 false,
                 false))
             {
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
-                    bool replaceAuto = false;
-                    List<int> overlapping = _tracker.FindOverlappingAutoAbsenceIndices(dlg.SelectedStart, dlg.SelectedEnd);
-                    if (overlapping.Count > 0)
-                    {
-                        DialogResult ask = MessageBox.Show(
-                            "Já existe um registro automático (Bloqueio de Tela / Pausa) neste horário.\n\nDeseja substituir o registro automático por esta justificativa para não duplicar o tempo ausente?",
-                            "Evitar duplicidade",
-                            MessageBoxButtons.YesNo,
-                            MessageBoxIcon.Question);
-                        replaceAuto = (ask == DialogResult.Yes);
-                    }
-
-                    _tracker.AddManualAbsence(dlg.SelectedStart, dlg.SelectedEnd, dlg.SelectedType, dlg.EnteredNote, replaceAuto);
+                    // Padrão: sobrescreve automaticamente bloqueios e sessões no período
+                    _tracker.AddManualAbsence(dlg.SelectedStart, dlg.SelectedEnd, dlg.SelectedType, dlg.EnteredNote, dlg.SelectedCredited, true);
                     RefreshData();
                     RaiseDataModified();
                 }
@@ -279,7 +400,7 @@ namespace RelogioAcompanhamento
         {
             if (_gridAbsences.SelectedRows.Count == 0)
             {
-                MessageBox.Show("Selecione uma ausência na lista para editar.", "Ausências", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("Selecione uma ausência na lista para justificar ou editar.", "Ausências", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -297,17 +418,18 @@ namespace RelogioAcompanhamento
             AbsenceRecord target = list[idx];
 
             using (AbsenceDialogForm dlg = new AbsenceDialogForm(
-                "Editar / Reclassificar Ausência",
+                "Justificar / Editar Ausência",
                 target.Type,
                 target.StartTime,
                 target.EndTime,
                 target.Note,
+                target.Credited,
                 true,
                 false))
             {
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
-                    _tracker.UpdateAbsence(idx, dlg.SelectedType, dlg.EnteredNote);
+                    _tracker.UpdateAbsence(idx, dlg.SelectedType, dlg.EnteredNote, dlg.SelectedCredited);
                     RefreshData();
                     RaiseDataModified();
                 }
@@ -345,6 +467,44 @@ namespace RelogioAcompanhamento
             }
         }
 
+        private void OpenClassifySelectedDayDialog()
+        {
+            DateTime targetDate = DateTime.Today;
+            if (_gridBank.SelectedRows.Count > 0 && _gridBank.SelectedRows[0].Tag is DateTime)
+            {
+                targetDate = (DateTime)_gridBank.SelectedRows[0].Tag;
+            }
+            else if (!HourBankCalculator.IsWeekday(targetDate))
+            {
+                while (!HourBankCalculator.IsWeekday(targetDate))
+                {
+                    targetDate = targetDate.AddDays(-1);
+                }
+            }
+
+            Dictionary<string, DayOverrideRecord> overrides = _storage.LoadDayOverrides();
+            string key = targetDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            DayOverrideRecord existing;
+            overrides.TryGetValue(key, out existing);
+
+            using (DayOverrideDialogForm dlg = new DayOverrideDialogForm(targetDate, existing))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    if (dlg.DeleteRequested)
+                    {
+                        _storage.DeleteDayOverride(dlg.SelectedWorkDate);
+                    }
+                    else if (dlg.ResultRecord != null)
+                    {
+                        _storage.UpsertDayOverride(dlg.ResultRecord);
+                    }
+                    RefreshData();
+                    RaiseDataModified();
+                }
+            }
+        }
+
         public void RefreshData()
         {
             DateTime now = DateTime.Now;
@@ -356,28 +516,34 @@ namespace RelogioAcompanhamento
                 ? TimeFormat.FormatHms(today.OvertimeSeconds)
                 : "Sem extra";
             _lblTodayAbsences.Text = TimeFormat.FormatHms(today.TotalAbsenceSeconds);
-            _lblTodayStatus.Text = _tracker.InMeetingMode && _tracker.State == TrackerState.Working && today.StatusLabel == "Normal"
-                ? "Em reunião"
-                : today.StatusLabel;
 
-            if (today.TotalSeconds >= _tracker.TotalLimitSeconds)
+            if (_tracker.PersonalUseMode)
             {
+                _lblTodayStatus.Text = "Uso pessoal";
+                _lblTodayStatus.ForeColor = Color.FromArgb(129, 140, 248);
+            }
+            else if (today.TotalSeconds >= _tracker.TotalLimitSeconds)
+            {
+                _lblTodayStatus.Text = today.StatusLabel;
                 _lblTodayStatus.ForeColor = Color.FromArgb(239, 68, 68);
             }
             else if (_tracker.OvertimeLimitSeconds > 0 && today.TotalSeconds >= _tracker.RegularLimitSeconds)
             {
+                _lblTodayStatus.Text = today.StatusLabel;
                 _lblTodayStatus.ForeColor = Color.FromArgb(249, 115, 22);
             }
             else if (_tracker.InMeetingMode && _tracker.State == TrackerState.Working)
             {
+                _lblTodayStatus.Text = "Em reunião";
                 _lblTodayStatus.ForeColor = Color.FromArgb(56, 189, 248);
             }
             else
             {
+                _lblTodayStatus.Text = today.StatusLabel;
                 _lblTodayStatus.ForeColor = Color.FromArgb(34, 197, 94);
             }
 
-            // Sessões de hoje (preserva seleção)
+            // Sessões de hoje
             int selSessionIdx = _gridSessions.SelectedRows.Count > 0 ? _gridSessions.SelectedRows[0].Index : -1;
             _gridSessions.Rows.Clear();
             List<WorkSession> sessions = _tracker.GetTodaySessionsSnapshot();
@@ -395,7 +561,7 @@ namespace RelogioAcompanhamento
                 _gridSessions.Rows[selSessionIdx].Selected = true;
             }
 
-            // Ausências / Intervalos de hoje (preserva seleção)
+            // Ausências / Intervalos
             int selAbsenceIdx = _gridAbsences.SelectedRows.Count > 0 ? _gridAbsences.SelectedRows[0].Index : -1;
             _gridAbsences.Rows.Clear();
             List<AbsenceRecord> absences = _tracker.GetTodayAbsencesSnapshot();
@@ -413,8 +579,13 @@ namespace RelogioAcompanhamento
                     a.IsActive ? "Agora" : a.EndTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
                     TimeFormat.FormatHms(a.DurationSeconds),
                     AbsenceTypes.GetDisplayName(a.Type),
+                    a.Credited ? "Sim" : "Não",
                     noteDisplay);
                 _gridAbsences.Rows[rowIdx].Tag = a.IsActive ? -1 : i;
+                if (a.Credited)
+                {
+                    _gridAbsences.Rows[rowIdx].Cells["Abonado"].Style.ForeColor = Color.FromArgb(134, 239, 172);
+                }
                 if (string.IsNullOrEmpty(a.Note) && !a.IsActive && a.Type == AbsenceTypes.BloqueioTela)
                 {
                     _gridAbsences.Rows[rowIdx].Cells["Observacao"].Style.ForeColor = Color.FromArgb(148, 163, 184);
@@ -478,6 +649,220 @@ namespace RelogioAcompanhamento
             if (selDailyIdx >= 0 && selDailyIdx < _gridDaily.Rows.Count)
             {
                 _gridDaily.Rows[selDailyIdx].Selected = true;
+            }
+
+            // Aba Banco de Horas
+            RefreshHourBankTab(now, today, daily);
+        }
+
+        private void RefreshHourBankTab(DateTime now, DailyRecord todayLive, List<DailyRecord> savedDaily)
+        {
+            bool isClt8h = (_config.Profile == WorkProfile.Clt8h);
+            _bankContentPanel.Visible = isClt8h;
+            _lblBankDisabledNotice.Visible = !isClt8h;
+            if (!isClt8h)
+            {
+                return;
+            }
+
+            DateTime bankStart;
+            if (!DateTime.TryParseExact(_config.BankStartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out bankStart))
+            {
+                bankStart = new DateTime(2026, 11, 23);
+            }
+
+            DateTime cycleStart, cycleEnd;
+            int cycleNum;
+            HourBankCalculator.GetCyclePeriod(now.Date, out cycleStart, out cycleEnd, out cycleNum);
+            DateTime effStart = cycleStart < bankStart ? bankStart : cycleStart;
+
+            Dictionary<string, int> creditedMap = _storage.LoadCreditedAbsenceSecondsByDate(effStart, now.Date);
+            Dictionary<string, DayOverrideRecord> overrides = _storage.LoadDayOverrides();
+            int todayLiveCredited = _tracker.GetTodayCreditedAbsenceSeconds(now);
+
+            HourBankSnapshot snap = HourBankCalculator.BuildSnapshot(
+                now.Date,
+                todayLive,
+                todayLiveCredited,
+                savedDaily,
+                creditedMap,
+                overrides,
+                bankStart);
+
+            UpdateBankCard(_lblBankWeekTitle, _lblBankWeekBalance, _lblBankWeekComp, "SEMANAL (" + snap.Week.PeriodTitle + ")", snap.Week);
+            UpdateBankCard(_lblBankMonthTitle, _lblBankMonthBalance, _lblBankMonthComp, "MENSAL (" + snap.Month.PeriodTitle + ")", snap.Month);
+            UpdateBankCard(_lblBankCycleTitle, _lblBankCycleBalance, _lblBankCycleComp, snap.Cycle.PeriodTitle.ToUpperInvariant(), snap.Cycle);
+
+            if (snap.TodayEntry != null)
+            {
+                int effToday = Math.Max(
+                    snap.TodayEntry.WorkedSeconds,
+                    Math.Min(HourBankCalculator.DailyTargetSeconds, snap.TodayEntry.WorkedSeconds + snap.TodayEntry.CreditedSeconds));
+                int remaining = Math.Max(0, HourBankCalculator.DailyTargetSeconds - effToday);
+
+                string pendingWarn = snap.Cycle.PendingDaysCount > 0
+                    ? string.Format("  |  ATENÇÃO: {0} dia(s) sem registro", snap.Cycle.PendingDaysCount)
+                    : string.Empty;
+
+                if (remaining > 0)
+                {
+                    _lblBankTodayStrip.Text = string.Format(
+                        "Hoje ({0:dd/MM} — em andamento): {1} trab. + {2} abon.  |  Faltam {3} p/ 8h (tolerância ±15m){4}",
+                        snap.TodayEntry.Date,
+                        TimeFormat.FormatHms(snap.TodayEntry.WorkedSeconds),
+                        TimeFormat.FormatHms(snap.TodayEntry.CreditedSeconds),
+                        TimeFormat.FormatHms(remaining),
+                        pendingWarn);
+                }
+                else
+                {
+                    _lblBankTodayStrip.Text = string.Format(
+                        "Hoje ({0:dd/MM} — em andamento): {1} trab. + {2} abon.  |  Saldo provisório ao encerrar: {3}{4}",
+                        snap.TodayEntry.Date,
+                        TimeFormat.FormatHms(snap.TodayEntry.WorkedSeconds),
+                        TimeFormat.FormatHms(snap.TodayEntry.CreditedSeconds),
+                        TimeFormat.FormatSignedHms(snap.TodayEntry.BalanceSeconds),
+                        pendingWarn);
+                }
+                _lblBankTodayStrip.ForeColor = snap.Cycle.PendingDaysCount > 0
+                    ? Color.FromArgb(250, 204, 21)
+                    : Color.FromArgb(203, 213, 225);
+            }
+            else
+            {
+                _lblBankTodayStrip.Text = "Hoje é fim de semana (Banco de Horas contabiliza apenas segunda a sexta).";
+                _lblBankTodayStrip.ForeColor = Color.FromArgb(148, 163, 184);
+            }
+
+            // Preenche grade preservando seleção
+            int selBankIdx = _gridBank.SelectedRows.Count > 0 ? _gridBank.SelectedRows[0].Index : -1;
+            _gridBank.Rows.Clear();
+
+            bool monthOnly = (_cmbBankScope.SelectedIndex == 0);
+
+            // Mostra hoje no topo como referência em andamento (se dia útil)
+            if (snap.TodayEntry != null)
+            {
+                int rIdx = _gridBank.Rows.Add(
+                    snap.TodayEntry.WorkDate + " (Hoje)",
+                    snap.TodayEntry.DayOfWeekShort,
+                    TimeFormat.FormatHms(snap.TodayEntry.WorkedSeconds),
+                    TimeFormat.FormatHms(snap.TodayEntry.CreditedSeconds),
+                    "Em andamento",
+                    snap.TodayEntry.StatusText);
+                _gridBank.Rows[rIdx].Tag = snap.TodayEntry.Date;
+                _gridBank.Rows[rIdx].Cells["Saldo"].Style.ForeColor = Color.FromArgb(56, 189, 248);
+            }
+
+            foreach (HourBankDayEntry item in snap.CycleDays)
+            {
+                if (monthOnly && !item.IsInCurrentMonth)
+                {
+                    continue;
+                }
+
+                int rIdx = _gridBank.Rows.Add(
+                    item.WorkDate,
+                    item.DayOfWeekShort,
+                    TimeFormat.FormatHms(item.WorkedSeconds),
+                    TimeFormat.FormatHms(item.CreditedSeconds),
+                    TimeFormat.FormatSignedHms(item.BalanceSeconds),
+                    item.StatusText);
+                _gridBank.Rows[rIdx].Tag = item.Date;
+
+                if (item.NeedsAttention)
+                {
+                    _gridBank.Rows[rIdx].DefaultCellStyle.BackColor = Color.FromArgb(58, 34, 24);
+                    _gridBank.Rows[rIdx].Cells["Saldo"].Style.ForeColor = Color.FromArgb(248, 113, 113);
+                    _gridBank.Rows[rIdx].Cells["Situacao"].Style.ForeColor = Color.FromArgb(250, 204, 21);
+                }
+                else if (item.BalanceSeconds > 0)
+                {
+                    _gridBank.Rows[rIdx].Cells["Saldo"].Style.ForeColor = Color.FromArgb(74, 222, 128);
+                }
+                else if (item.BalanceSeconds < 0)
+                {
+                    _gridBank.Rows[rIdx].Cells["Saldo"].Style.ForeColor = Color.FromArgb(248, 113, 113);
+                }
+            }
+
+            if (selBankIdx >= 0 && selBankIdx < _gridBank.Rows.Count)
+            {
+                _gridBank.Rows[selBankIdx].Selected = true;
+            }
+        }
+
+        private static void CreateBankCard(
+            TableLayoutPanel parent,
+            int col,
+            string title,
+            float dpiScale,
+            out Label lblTitle,
+            out Label lblBalance,
+            out Label lblComp)
+        {
+            Panel card = new Panel();
+            card.Dock = DockStyle.Fill;
+            card.Margin = new Padding((int)Math.Round(3 * dpiScale));
+            card.BackColor = Color.FromArgb(30, 34, 43);
+            card.Padding = new Padding(
+                (int)Math.Round(10 * dpiScale),
+                (int)Math.Round(6 * dpiScale),
+                (int)Math.Round(10 * dpiScale),
+                (int)Math.Round(6 * dpiScale));
+
+            lblTitle = new Label();
+            lblTitle.Text = title;
+            lblTitle.Dock = DockStyle.Top;
+            lblTitle.Height = (int)Math.Round(17 * dpiScale);
+            lblTitle.AutoEllipsis = true;
+            lblTitle.Font = new Font("Segoe UI", 7.5f, FontStyle.Bold);
+            lblTitle.ForeColor = Color.FromArgb(148, 163, 184);
+
+            lblComp = new Label();
+            lblComp.Text = "A compensar: 00:00:00";
+            lblComp.Dock = DockStyle.Bottom;
+            lblComp.Height = (int)Math.Round(18 * dpiScale);
+            lblComp.AutoEllipsis = true;
+            lblComp.Font = new Font("Segoe UI", 8f, FontStyle.Regular);
+            lblComp.ForeColor = Color.FromArgb(148, 163, 184);
+
+            lblBalance = new Label();
+            lblBalance.Text = "00:00:00";
+            lblBalance.Dock = DockStyle.Fill;
+            lblBalance.Font = new Font("Consolas", 13.5f, FontStyle.Bold);
+            lblBalance.ForeColor = Color.FromArgb(248, 250, 252);
+            lblBalance.TextAlign = ContentAlignment.MiddleLeft;
+
+            card.Controls.Add(lblBalance);
+            card.Controls.Add(lblTitle);
+            card.Controls.Add(lblComp);
+            parent.Controls.Add(card, col, 0);
+        }
+
+        private static void UpdateBankCard(Label lblTitle, Label lblBalance, Label lblComp, string titleText, HourBankPeriodSummary summary)
+        {
+            lblTitle.Text = titleText;
+            lblBalance.Text = TimeFormat.FormatSignedHms(summary.BalanceSeconds);
+
+            if (summary.BalanceSeconds > 0)
+            {
+                lblBalance.ForeColor = Color.FromArgb(74, 222, 128);
+                lblComp.Text = "A compensar: 00:00:00 (saldo positivo)";
+                lblComp.ForeColor = Color.FromArgb(134, 239, 172);
+            }
+            else if (summary.BalanceSeconds < 0)
+            {
+                lblBalance.ForeColor = Color.FromArgb(248, 113, 113);
+                string pend = summary.PendingDaysCount > 0 ? string.Format(" ({0} pend.)", summary.PendingDaysCount) : string.Empty;
+                lblComp.Text = "A compensar: " + TimeFormat.FormatHms(summary.ToCompensateSeconds) + pend;
+                lblComp.ForeColor = Color.FromArgb(252, 165, 165);
+            }
+            else
+            {
+                lblBalance.ForeColor = Color.FromArgb(248, 250, 252);
+                lblComp.Text = "A compensar: 00:00:00 (zerado)";
+                lblComp.ForeColor = Color.FromArgb(148, 163, 184);
             }
         }
 
@@ -585,13 +970,14 @@ namespace RelogioAcompanhamento
             {
                 case "Ativo": return "Em andamento";
                 case "EmReuniao": return "Em reunião (ativo)";
+                case "UsoPessoal": return "Troca para uso pessoal";
                 case "BloqueioTela": return "Bloqueio de tela";
                 case "Logoff": return "Logoff / Desconexão";
                 case "Suspensao": return "Suspensão / Hibernação";
                 case "PausaManual": return "Pausa rápida";
                 case "Intervalo": return "Intervalo / Almoço";
                 case "Medico": return "Ida ao Médico";
-                case "AusenciaManual": return "Outra ausência";
+                case "AusenciaManual": return "Ausência lançada";
                 case "Desligamento": return "Desligamento";
                 case "Encerrado": return "App fechado";
                 case "ViradaDeDia": return "Virada de dia (00:00)";

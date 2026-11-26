@@ -20,6 +20,7 @@ namespace RelogioAcompanhamento
         private TrackerState _state;
         private AlertLevel _alertLevel;
         private bool _inMeetingMode;
+        private bool _personalUseMode;
         private string _activeAbsenceType;
         private bool _pulsePhase;
         private bool _isDemoMode;
@@ -123,6 +124,7 @@ namespace RelogioAcompanhamento
             TrackerState state,
             AlertLevel alertLevel,
             bool inMeetingMode,
+            bool personalUseMode,
             string activeAbsenceType)
         {
             _totalSeconds = totalSeconds;
@@ -131,9 +133,10 @@ namespace RelogioAcompanhamento
             _state = state;
             _alertLevel = alertLevel;
             _inMeetingMode = inMeetingMode;
+            _personalUseMode = personalUseMode;
             _activeAbsenceType = activeAbsenceType ?? string.Empty;
 
-            if (alertLevel == AlertLevel.LimitReached && state == TrackerState.Working)
+            if (alertLevel == AlertLevel.LimitReached && state == TrackerState.Working && !personalUseMode)
             {
                 _pulsePhase = !_pulsePhase;
             }
@@ -143,8 +146,10 @@ namespace RelogioAcompanhamento
             }
 
             string titlePrefix = _isDemoMode ? "[DEMO] " : string.Empty;
-            string meetingTag = (_inMeetingMode && _state == TrackerState.Working) ? " [Reunião]" : string.Empty;
-            string nextTitle = string.Format("{0}{1}{2} — Relógio Acompanhamento", titlePrefix, TimeFormat.FormatHms(totalSeconds), meetingTag);
+            string modeTag = _personalUseMode
+                ? " [Uso Pessoal]"
+                : ((_inMeetingMode && _state == TrackerState.Working) ? " [Reunião]" : string.Empty);
+            string nextTitle = string.Format("{0}{1}{2} — Relógio Acompanhamento", titlePrefix, TimeFormat.FormatHms(totalSeconds), modeTag);
             if (Text != nextTitle)
             {
                 Text = nextTitle;
@@ -559,6 +564,11 @@ namespace RelogioAcompanhamento
 
         private Color GetAccentColor()
         {
+            if (_personalUseMode)
+            {
+                return Color.FromArgb(129, 140, 248);
+            }
+
             if (_state != TrackerState.Working)
             {
                 return Color.FromArgb(148, 163, 184);
@@ -582,6 +592,11 @@ namespace RelogioAcompanhamento
         private string GetStatusText()
         {
             string prefix = _isDemoMode ? "[DEMO] " : string.Empty;
+
+            if (_personalUseMode)
+            {
+                return prefix + "Uso pessoal";
+            }
 
             if (_state == TrackerState.PausedManual)
             {

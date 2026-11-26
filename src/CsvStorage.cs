@@ -11,7 +11,8 @@ namespace RelogioAcompanhamento
         private static readonly UTF8Encoding Utf8Bom = new UTF8Encoding(true);
         private const string DailyHeader = "Data;PrimeiroInicio;UltimoRegistro;TotalTrabalhado;HorasNormais;HorasExtras;TotalSegundos;StatusLimite;TotalAusencias";
         private const string SessionsHeader = "Data;Inicio;Fim;DuracaoSegundos;Motivo";
-        private const string AbsencesHeader = "Data;Inicio;Fim;DuracaoSegundos;Tipo;Observacao";
+        private const string AbsencesHeader = "Data;Inicio;Fim;DuracaoSegundos;Tipo;Observacao;Abonado";
+        private const string OverridesHeader = "Data;Tipo;SegundosAbonados;SegundosTrabalhadosManual;Observacao";
 
         public string BaseDirectory { get; private set; }
 
@@ -53,6 +54,11 @@ namespace RelogioAcompanhamento
         public string GetDailyFilePath()
         {
             return Path.Combine(BaseDirectory, "registros_diarios.csv");
+        }
+
+        public string GetOverridesFilePath()
+        {
+            return Path.Combine(BaseDirectory, "dias_especiais.csv");
         }
 
         public string GetSessionsFilePath(string workDate)
@@ -114,6 +120,8 @@ namespace RelogioAcompanhamento
                     }
                     else if (key == "StartWithWindows" && bool.TryParse(val, out boolVal)) config.StartWithWindows = boolVal;
                     else if (key == "AutoStartCounting" && bool.TryParse(val, out boolVal)) config.AutoStartCounting = boolVal;
+                    else if (key == "AskModeOnStartup" && bool.TryParse(val, out boolVal)) config.AskModeOnStartup = boolVal;
+                    else if (key == "BankStartDate" && val.Length == 10) config.BankStartDate = val;
                     else if (key == "WidgetVisible" && bool.TryParse(val, out boolVal)) config.WidgetVisible = boolVal;
                     else if (key == "AlwaysOnTop" && bool.TryParse(val, out boolVal)) config.AlwaysOnTop = boolVal;
                     else if (key == "KeepInTaskbar" && bool.TryParse(val, out boolVal)) config.ShowInTaskbar = boolVal;
@@ -142,6 +150,8 @@ namespace RelogioAcompanhamento
             sb.AppendLine("WorkProfile=" + config.Profile.ToString());
             sb.AppendLine("StartWithWindows=" + config.StartWithWindows.ToString());
             sb.AppendLine("AutoStartCounting=" + config.AutoStartCounting.ToString());
+            sb.AppendLine("AskModeOnStartup=" + config.AskModeOnStartup.ToString());
+            sb.AppendLine("BankStartDate=" + Sanitize(config.BankStartDate));
             sb.AppendLine("WidgetVisible=" + config.WidgetVisible.ToString());
             sb.AppendLine("AlwaysOnTop=" + config.AlwaysOnTop.ToString());
             sb.AppendLine("KeepInTaskbar=" + config.ShowInTaskbar.ToString());
@@ -295,6 +305,39 @@ namespace RelogioAcompanhamento
             return result;
         }
 
+        public Dictionary<string, int> LoadCreditedAbsenceSecondsByDate(DateTime startDate, DateTime endDate)
+        {
+            Dictionary<string, int> totals = new Dictionary<string, int>();
+            DateTime cursor = new DateTime(startDate.Year, startDate.Month, 1);
+            DateTime lastMonth = new DateTime(endDate.Year, endDate.Month, 1);
+
+            while (cursor <= lastMonth)
+            {
+                string ym = cursor.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+                string path = Path.Combine(BaseDirectory, string.Format("ausencias_{0}.csv", ym));
+                if (File.Exists(path))
+                {
+                    List<AbsenceRecord> list = ReadAbsencesFile(path);
+                    foreach (AbsenceRecord a in list)
+                    {
+                        if (!a.Credited || a.DurationSeconds <= 0) continue;
+                        int existing;
+                        if (totals.TryGetValue(a.WorkDate, out existing))
+                        {
+                            totals[a.WorkDate] = existing + a.DurationSeconds;
+                        }
+                        else
+                        {
+                            totals[a.WorkDate] = a.DurationSeconds;
+                        }
+                    }
+                }
+                cursor = cursor.AddMonths(1);
+            }
+
+            return totals;
+        }
+
         public void SaveAbsencesForDate(string workDate, List<AbsenceRecord> absencesForDate)
         {
             EnsureDirectory();
@@ -327,16 +370,102 @@ namespace RelogioAcompanhamento
             {
                 sb.AppendLine(string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0};{1};{2};{3};{4};{5}",
+                    "{0};{1};{2};{3};{4};{5};{6}",
                     Sanitize(a.WorkDate),
                     a.StartTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
                     a.EndTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
                     a.DurationSeconds,
                     Sanitize(a.Type),
-                    Sanitize(a.Note)));
+                    Sanitize(a.Note),
+                    a.Credited ? "Sim" : "Nao"));
             }
 
             WriteAllTextAtomic(path, sb.ToString(), Utf8Bom);
+        }
+
+        public Dictionary<string, DayOverrideRecord> LoadDayOverrides()
+        {
+            Dictionary<string, DayOverrideRecord> map = new Dictionary<string, DayOverrideRecord>();
+            string path = GetOverridesFilePath();
+            if (!File.Exists(path))
+            {
+                return map;
+            }
+
+            try
+            {
+                string[] lines = File.ReadAllLines(path, Encoding.UTF8);
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    string line = lines[i].Trim();
+                    if (line.Length == 0) continue;
+                    string[] parts = line.Split(';');
+                    if (parts.Length < 4) continue;
+
+                    int credSec;
+                    int manWorkedSec;
+                    int.TryParse(parts[2].Trim(), out credSec);
+                    int.TryParse(parts[3].Trim(), out manWorkedSec);
+
+                    DayOverrideRecord rec = new DayOverrideRecord();
+                    rec.WorkDate = parts[0].Trim();
+                    rec.Type = parts[1].Trim();
+                    rec.CreditedSeconds = Math.Max(0, credSec);
+                    rec.ManualWorkedSeconds = Math.Max(0, manWorkedSec);
+                    rec.Note = parts.Length >= 5 ? parts[4].Trim() : string.Empty;
+                    map[rec.WorkDate] = rec;
+                }
+            }
+            catch
+            {
+                // Ignora arquivo corrompido
+            }
+
+            return map;
+        }
+
+        public void UpsertDayOverride(DayOverrideRecord record)
+        {
+            EnsureDirectory();
+            Dictionary<string, DayOverrideRecord> map = LoadDayOverrides();
+            map[record.WorkDate] = record;
+            WriteDayOverrides(map);
+        }
+
+        public void DeleteDayOverride(string workDate)
+        {
+            string path = GetOverridesFilePath();
+            if (!File.Exists(path)) return;
+            Dictionary<string, DayOverrideRecord> map = LoadDayOverrides();
+            if (map.Remove(workDate))
+            {
+                WriteDayOverrides(map);
+            }
+        }
+
+        private void WriteDayOverrides(Dictionary<string, DayOverrideRecord> map)
+        {
+            List<DayOverrideRecord> list = new List<DayOverrideRecord>(map.Values);
+            list.Sort(delegate(DayOverrideRecord a, DayOverrideRecord b)
+            {
+                return string.CompareOrdinal(a.WorkDate, b.WorkDate);
+            });
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine(OverridesHeader);
+            foreach (DayOverrideRecord r in list)
+            {
+                sb.AppendLine(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0};{1};{2};{3};{4}",
+                    Sanitize(r.WorkDate),
+                    Sanitize(r.Type),
+                    r.CreditedSeconds,
+                    r.ManualWorkedSeconds,
+                    Sanitize(r.Note)));
+            }
+
+            WriteAllTextAtomic(GetOverridesFilePath(), sb.ToString(), Utf8Bom);
         }
 
         public List<DailyRecord> LoadDailyRecords()
@@ -538,13 +667,28 @@ namespace RelogioAcompanhamento
                         durSec = Math.Max(0, (int)(endDt - startDt).TotalSeconds);
                     }
 
+                    string type = parts[4].Trim();
+                    bool credited;
+                    if (parts.Length >= 7)
+                    {
+                        string flag = parts[6].Trim();
+                        credited = string.Equals(flag, "Sim", StringComparison.OrdinalIgnoreCase) ||
+                                   string.Equals(flag, "True", StringComparison.OrdinalIgnoreCase) ||
+                                   flag == "1";
+                    }
+                    else
+                    {
+                        credited = AbsenceTypes.IsCreditedByDefault(type);
+                    }
+
                     AbsenceRecord rec = new AbsenceRecord();
                     rec.WorkDate = workDate;
                     rec.StartTime = startDt;
                     rec.EndTime = endDt;
                     rec.DurationSeconds = Math.Max(0, durSec);
-                    rec.Type = parts[4].Trim();
+                    rec.Type = type;
                     rec.Note = parts.Length >= 6 ? parts[5].Trim() : string.Empty;
+                    rec.Credited = credited;
                     rec.IsActive = false;
                     list.Add(rec);
                 }

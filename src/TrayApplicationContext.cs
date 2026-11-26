@@ -22,8 +22,10 @@ namespace RelogioAcompanhamento
         private ToolStripMenuItem _menuShowHide;
         private ToolStripMenuItem _menuPauseResume;
         private ToolStripMenuItem _menuMeetingMode;
+        private ToolStripMenuItem _menuPersonalMode;
         private ToolStripMenuItem _menuProfileClt;
         private ToolStripMenuItem _menuProfileEstagiario;
+        private ToolStripMenuItem _menuAskModeOnStartup;
         private ToolStripMenuItem _menuAutoStartCounting;
         private ToolStripMenuItem _menuAlwaysOnTop;
         private ToolStripMenuItem _menuShowInTaskbar;
@@ -39,12 +41,30 @@ namespace RelogioAcompanhamento
             _storage = new CsvStorage(CsvStorage.GetDefaultDataDirectory(demoMode));
             _config = _storage.LoadConfig();
 
+            bool startPersonal = false;
+            if (!demoMode && _config.AskModeOnStartup)
+            {
+                using (StartupModeDialogForm modeDlg = new StartupModeDialogForm())
+                {
+                    DialogResult res = modeDlg.ShowDialog();
+                    if (res == DialogResult.OK)
+                    {
+                        startPersonal = modeDlg.SelectedPersonalUse;
+                    }
+                    else
+                    {
+                        // Se fechou o diálogo no X, inicia em uso pessoal por segurança
+                        startPersonal = true;
+                    }
+                }
+            }
+
             int regularSec = demoMode ? (_config.Profile == WorkProfile.Estagiario6h ? 45 : 60) : _config.RegularLimitMinutes * 60;
             int overtimeSec = demoMode ? (_config.Profile == WorkProfile.Estagiario6h ? 0 : 30) : _config.OvertimeLimitMinutes * 60;
             int preAlertSec = demoMode ? 15 : _config.PreAlertMinutes * 60;
 
             _tracker = new TimeTracker(_storage, regularSec, overtimeSec, null, 30);
-            _tracker.Initialize(_config.AutoStartCounting);
+            _tracker.Initialize(_config.AutoStartCounting, startPersonal);
 
             _alerts = new AlertManager(_storage, regularSec, overtimeSec, preAlertSec);
 
@@ -100,7 +120,7 @@ namespace RelogioAcompanhamento
             ToolStripMenuItem menuPauseAs = new ToolStripMenuItem("Pausar como Ausência");
             ToolStripMenuItem absIntervalo = new ToolStripMenuItem("Intervalo / Almoço");
             absIntervalo.Click += delegate { StartTypedAbsence(AbsenceTypes.Intervalo, string.Empty); };
-            ToolStripMenuItem absMedico = new ToolStripMenuItem("Ida ao Médico");
+            ToolStripMenuItem absMedico = new ToolStripMenuItem("Ida ao Médico (Abona BH)");
             absMedico.Click += delegate { StartTypedAbsence(AbsenceTypes.Medico, string.Empty); };
             ToolStripMenuItem absRapida = new ToolStripMenuItem("Pausa Rápida");
             absRapida.Click += delegate { StartTypedAbsence(AbsenceTypes.PausaRapida, string.Empty); };
@@ -117,10 +137,15 @@ namespace RelogioAcompanhamento
             _menuMeetingMode.Click += delegate { ToggleMeetingMode(); };
             menu.Items.Add(_menuMeetingMode);
 
+            _menuPersonalMode = new ToolStripMenuItem("Modo Uso Pessoal / Hobby (não contabilizar)");
+            _menuPersonalMode.Checked = _tracker.PersonalUseMode;
+            _menuPersonalMode.Click += delegate { TogglePersonalMode(); };
+            menu.Items.Add(_menuPersonalMode);
+
             menu.Items.Add(new ToolStripSeparator());
 
             ToolStripMenuItem menuProfile = new ToolStripMenuItem("Jornada de Trabalho");
-            _menuProfileClt = new ToolStripMenuItem("Padrão — 8h diárias (+2h extras)");
+            _menuProfileClt = new ToolStripMenuItem("Padrão — 8h diárias (+2h extras e BH)");
             _menuProfileClt.Click += delegate { SwitchProfile(WorkProfile.Clt8h); };
             _menuProfileEstagiario = new ToolStripMenuItem("Estagiário — 6h diárias (sem extras)");
             _menuProfileEstagiario.Click += delegate { SwitchProfile(WorkProfile.Estagiario6h); };
@@ -181,7 +206,7 @@ namespace RelogioAcompanhamento
 
             menu.Items.Add(new ToolStripSeparator());
 
-            ToolStripMenuItem menuHistory = new ToolStripMenuItem("Ver Histórico e Ausências...");
+            ToolStripMenuItem menuHistory = new ToolStripMenuItem("Ver Histórico, Ausências e Banco de Horas...");
             menuHistory.Click += delegate { OpenHistory(); };
             menu.Items.Add(menuHistory);
 
@@ -206,7 +231,17 @@ namespace RelogioAcompanhamento
 
             menu.Items.Add(new ToolStripSeparator());
 
-            _menuAutoStartCounting = new ToolStripMenuItem("Iniciar Contagem ao Abrir");
+            _menuAskModeOnStartup = new ToolStripMenuItem("Perguntar Modo ao Abrir (Trabalho / Pessoal)");
+            _menuAskModeOnStartup.Checked = _config.AskModeOnStartup;
+            _menuAskModeOnStartup.Click += delegate
+            {
+                _config.AskModeOnStartup = !_config.AskModeOnStartup;
+                _menuAskModeOnStartup.Checked = _config.AskModeOnStartup;
+                _storage.SaveConfig(_config);
+            };
+            menu.Items.Add(_menuAskModeOnStartup);
+
+            _menuAutoStartCounting = new ToolStripMenuItem("Iniciar Contagem ao Abrir (sem pergunta)");
             _menuAutoStartCounting.Checked = _config.AutoStartCounting;
             _menuAutoStartCounting.Click += delegate
             {
@@ -242,6 +277,10 @@ namespace RelogioAcompanhamento
 
         private void StartTypedAbsence(string type, string note)
         {
+            if (_tracker.PersonalUseMode)
+            {
+                _tracker.SetPersonalUseMode(false);
+            }
             _tracker.PauseManual(type, note);
             UpdateUiAndAlerts();
         }
@@ -256,10 +295,15 @@ namespace RelogioAcompanhamento
                 now,
                 string.Empty,
                 false,
+                false,
                 true))
             {
                 if (dlg.ShowDialog() == DialogResult.OK)
                 {
+                    if (_tracker.PersonalUseMode)
+                    {
+                        _tracker.SetPersonalUseMode(false);
+                    }
                     _tracker.PauseManual(dlg.SelectedType, dlg.EnteredNote);
                     UpdateUiAndAlerts();
                 }
@@ -277,28 +321,17 @@ namespace RelogioAcompanhamento
 
             using (AbsenceDialogForm dlg = new AbsenceDialogForm(
                 "Lançar Ausência / Intervalo",
-                AbsenceTypes.Intervalo,
+                AbsenceTypes.Medico,
                 defaultStart,
                 now,
                 string.Empty,
+                true,
                 false,
                 false))
             {
                 if (dlg.ShowDialog() == DialogResult.OK)
                 {
-                    bool replaceAuto = false;
-                    System.Collections.Generic.List<int> overlapping = _tracker.FindOverlappingAutoAbsenceIndices(dlg.SelectedStart, dlg.SelectedEnd);
-                    if (overlapping.Count > 0)
-                    {
-                        DialogResult ask = MessageBox.Show(
-                            "Já existe um registro automático (Bloqueio de Tela / Pausa) neste horário.\n\nDeseja substituir o registro automático por esta justificativa para não duplicar o tempo ausente?",
-                            "Evitar duplicidade",
-                            MessageBoxButtons.YesNo,
-                            MessageBoxIcon.Question);
-                        replaceAuto = (ask == DialogResult.Yes);
-                    }
-
-                    _tracker.AddManualAbsence(dlg.SelectedStart, dlg.SelectedEnd, dlg.SelectedType, dlg.EnteredNote, replaceAuto);
+                    _tracker.AddManualAbsence(dlg.SelectedStart, dlg.SelectedEnd, dlg.SelectedType, dlg.EnteredNote, dlg.SelectedCredited, true);
                     UpdateUiAndAlerts();
                 }
             }
@@ -306,9 +339,19 @@ namespace RelogioAcompanhamento
 
         private void ToggleMeetingMode()
         {
+            if (_tracker.PersonalUseMode)
+            {
+                _tracker.SetPersonalUseMode(false);
+            }
             bool next = !_tracker.InMeetingMode;
             _tracker.SetMeetingMode(next);
             _menuMeetingMode.Checked = next;
+            UpdateUiAndAlerts();
+        }
+
+        private void TogglePersonalMode()
+        {
+            _tracker.SetPersonalUseMode(!_tracker.PersonalUseMode);
             UpdateUiAndAlerts();
         }
 
@@ -521,7 +564,7 @@ namespace RelogioAcompanhamento
         {
             if (_historyForm == null || _historyForm.IsDisposed)
             {
-                _historyForm = new HistoryForm(_tracker, _storage);
+                _historyForm = new HistoryForm(_tracker, _storage, _config);
                 _historyForm.DataModified += delegate { UpdateUiAndAlerts(); };
                 if (_currentTrayIcon != null)
                 {
@@ -549,9 +592,10 @@ namespace RelogioAcompanhamento
                 _tracker.State,
                 level,
                 _tracker.InMeetingMode,
+                _tracker.PersonalUseMode,
                 _tracker.ActiveAbsenceType);
 
-            if (_tracker.State == TrackerState.Working)
+            if (_tracker.State == TrackerState.Working && !_tracker.PersonalUseMode)
             {
                 AlertNotification alert = _alerts.Evaluate(_tracker.CurrentDate, totalSec);
                 if (alert != null)
@@ -584,7 +628,8 @@ namespace RelogioAcompanhamento
         {
             int limitHours = Math.Max(1, _tracker.TotalLimitSeconds / 3600);
             string stateLabel;
-            if (_tracker.State == TrackerState.PausedManual)
+            if (_tracker.PersonalUseMode) stateLabel = "Uso pessoal";
+            else if (_tracker.State == TrackerState.PausedManual)
             {
                 stateLabel = !string.IsNullOrEmpty(_tracker.ActiveAbsenceType)
                     ? AbsenceTypes.GetShortWidgetLabel(_tracker.ActiveAbsenceType)
@@ -607,12 +652,15 @@ namespace RelogioAcompanhamento
             }
             _trayIcon.Text = tip;
 
-            bool isPaused = _tracker.State != TrackerState.Working;
-            string iconKey = isPaused ? "paused" : (_tracker.InMeetingMode && level == AlertLevel.Normal ? "meeting" : level.ToString());
+            bool isPaused = _tracker.State != TrackerState.Working || _tracker.PersonalUseMode;
+            string iconKey = _tracker.PersonalUseMode
+                ? "personal"
+                : (isPaused ? "paused" : (_tracker.InMeetingMode && level == AlertLevel.Normal ? "meeting" : level.ToString()));
+
             if (iconKey != _lastIconKey)
             {
                 _lastIconKey = iconKey;
-                Color c = GetIconColor(isPaused, level, _tracker.InMeetingMode);
+                Color c = GetIconColor(isPaused, level, _tracker.InMeetingMode, _tracker.PersonalUseMode);
                 Icon nextIcon = IconFactory.CreateClockIcon(c, isPaused);
                 Icon oldIcon = _currentTrayIcon;
                 _currentTrayIcon = nextIcon;
@@ -625,8 +673,9 @@ namespace RelogioAcompanhamento
             }
         }
 
-        private static Color GetIconColor(bool isPaused, AlertLevel level, bool inMeetingMode)
+        private static Color GetIconColor(bool isPaused, AlertLevel level, bool inMeetingMode, bool personalMode)
         {
+            if (personalMode) return Color.FromArgb(129, 140, 248);
             if (isPaused) return Color.FromArgb(148, 163, 184);
             switch (level)
             {
@@ -644,11 +693,19 @@ namespace RelogioAcompanhamento
                 ? "Minimizar / Ocultar Relógio (Ctrl+Alt+R)"
                 : "Mostrar Relógio (Ctrl+Alt+R)";
 
-            _menuPauseResume.Text = _tracker.State == TrackerState.Working
-                ? "Pausar Contagem"
-                : "Retomar Contagem";
+            if (_tracker.PersonalUseMode)
+            {
+                _menuPauseResume.Text = "Iniciar Trabalho";
+            }
+            else
+            {
+                _menuPauseResume.Text = _tracker.State == TrackerState.Working
+                    ? "Pausar Contagem"
+                    : "Retomar Contagem";
+            }
 
             _menuMeetingMode.Checked = _tracker.InMeetingMode;
+            _menuPersonalMode.Checked = _tracker.PersonalUseMode;
         }
 
         private void ExitApplication(string reason)
@@ -660,6 +717,27 @@ namespace RelogioAcompanhamento
             SystemEvents.SessionSwitch -= OnSessionSwitch;
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             SystemEvents.SessionEnding -= OnSessionEnding;
+
+            // Ao encerrar manualmente um dia útil em jornada 8h com trabalho registrado, sinaliza o saldo do dia
+            if (reason == "Encerrado" && _config.Profile == WorkProfile.Clt8h && !_tracker.PersonalUseMode && HourBankCalculator.IsWeekday(DateTime.Today))
+            {
+                int worked = _tracker.GetTodayTotalSeconds();
+                int credited = _tracker.GetTodayCreditedAbsenceSeconds();
+                if (worked >= 60 || credited >= 60)
+                {
+                    int delta = HourBankCalculator.CalculateDailyDeltaSeconds(worked, credited, HourBankCalculator.DailyTargetSeconds, HourBankCalculator.DailyToleranceSeconds);
+                    string summary = string.Format(
+                        "Hoje: {0} trabalhadas{1}. Saldo BH do dia: {2}",
+                        TimeFormat.FormatHms(worked),
+                        credited > 0 ? " + " + TimeFormat.FormatHms(credited) + " abonadas" : string.Empty,
+                        TimeFormat.FormatSignedHms(delta));
+                    try
+                    {
+                        _trayIcon.ShowBalloonTip(5000, "Resumo do Dia — Banco de Horas", summary, ToolTipIcon.Info);
+                    }
+                    catch { }
+                }
+            }
 
             _tracker.Shutdown(reason);
             SaveWidgetGeometry();

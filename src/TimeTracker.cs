@@ -21,6 +21,7 @@ namespace RelogioAcompanhamento
         public string CurrentDate { get; private set; }
         public TrackerState State { get; private set; }
         public bool InMeetingMode { get; private set; }
+        public bool PersonalUseMode { get; private set; }
         public int RegularLimitSeconds { get { return _regularLimitSeconds; } }
         public int OvertimeLimitSeconds { get { return _overtimeLimitSeconds; } }
         public int TotalLimitSeconds { get { return _regularLimitSeconds + _overtimeLimitSeconds; } }
@@ -46,6 +47,7 @@ namespace RelogioAcompanhamento
             _completedAbsences = new List<AbsenceRecord>();
             State = TrackerState.PausedSession;
             InMeetingMode = false;
+            PersonalUseMode = false;
             CurrentDate = _clock().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             _lastPersistTime = DateTime.MinValue;
         }
@@ -62,18 +64,46 @@ namespace RelogioAcompanhamento
             InMeetingMode = enabled;
         }
 
+        public void SetPersonalUseMode(bool enabled)
+        {
+            DateTime now = _clock();
+            if (enabled)
+            {
+                if (State == TrackerState.Working && _activeSession != null)
+                {
+                    CloseActiveSession(now, "UsoPessoal");
+                }
+                _activeAbsence = null;
+                InMeetingMode = false;
+                PersonalUseMode = true;
+                State = TrackerState.PausedManual;
+                Persist(now);
+            }
+            else
+            {
+                PersonalUseMode = false;
+                ResumeManual();
+            }
+        }
+
         public void Initialize()
         {
-            Initialize(true);
+            Initialize(true, false);
         }
 
         public void Initialize(bool autoStart)
+        {
+            Initialize(autoStart, false);
+        }
+
+        public void Initialize(bool autoStart, bool startInPersonalMode)
         {
             DateTime now = _clock();
             CurrentDate = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             _completedSessions.Clear();
             _completedAbsences.Clear();
             _activeAbsence = null;
+            PersonalUseMode = startInPersonalMode;
 
             List<WorkSession> loaded = _storage.LoadSessionsForDate(CurrentDate);
             foreach (WorkSession s in loaded)
@@ -91,7 +121,12 @@ namespace RelogioAcompanhamento
                 _completedAbsences.Add(a);
             }
 
-            if (autoStart)
+            if (startInPersonalMode)
+            {
+                _activeSession = null;
+                State = TrackerState.PausedManual;
+            }
+            else if (autoStart)
             {
                 StartActiveSession(now);
             }
@@ -101,13 +136,16 @@ namespace RelogioAcompanhamento
                 State = TrackerState.PausedManual;
             }
 
-            Persist(now);
+            if (!startInPersonalMode)
+            {
+                Persist(now);
+            }
         }
 
         public void ResetToday()
         {
             DateTime now = _clock();
-            bool wasWorking = (State == TrackerState.Working);
+            bool wasWorking = (State == TrackerState.Working && !PersonalUseMode);
             CurrentDate = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             _completedSessions.Clear();
             _completedAbsences.Clear();
@@ -144,7 +182,7 @@ namespace RelogioAcompanhamento
                 return;
             }
 
-            if (State == TrackerState.Working && _activeSession != null)
+            if (State == TrackerState.Working && _activeSession != null && !PersonalUseMode)
             {
                 if ((now - _lastPersistTime).TotalSeconds >= _heartbeatIntervalSeconds)
                 {
@@ -155,7 +193,7 @@ namespace RelogioAcompanhamento
 
         public void PauseBySession(string reason)
         {
-            if (State != TrackerState.Working)
+            if (PersonalUseMode || State != TrackerState.Working)
             {
                 return;
             }
@@ -173,13 +211,13 @@ namespace RelogioAcompanhamento
             State = TrackerState.PausedSession;
 
             string note = normalizedReason == "Suspensao" ? "Suspensão" : (normalizedReason == "Logoff" ? "Logoff" : string.Empty);
-            StartActiveAbsence(now, AbsenceTypes.BloqueioTela, note);
+            StartActiveAbsence(now, AbsenceTypes.BloqueioTela, note, false);
             Persist(now);
         }
 
         public void ResumeFromSession()
         {
-            if (State != TrackerState.PausedSession)
+            if (PersonalUseMode || State != TrackerState.PausedSession)
             {
                 return;
             }
@@ -188,7 +226,6 @@ namespace RelogioAcompanhamento
             string today = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             if (today != CurrentDate)
             {
-                // Desbloqueou em outro dia: não contabiliza a noite toda como ausência
                 _activeAbsence = null;
                 SwitchToDate(today);
             }
@@ -208,38 +245,46 @@ namespace RelogioAcompanhamento
 
         public void PauseManual(string absenceType, string note)
         {
+            if (PersonalUseMode)
+            {
+                return;
+            }
+
             DateTime now = _clock();
             string type = string.IsNullOrEmpty(absenceType) ? AbsenceTypes.PausaRapida : absenceType;
+            bool credited = AbsenceTypes.IsCreditedByDefault(type);
 
             if (State == TrackerState.Working)
             {
                 CloseActiveSession(now, MapAbsenceToSessionReason(type));
                 State = TrackerState.PausedManual;
-                StartActiveAbsence(now, type, note);
+                StartActiveAbsence(now, type, note, credited);
                 Persist(now);
             }
             else if (_activeAbsence != null)
             {
-                // Já está pausado: permite atualizar o motivo da ausência em andamento
                 _activeAbsence.Type = type;
                 _activeAbsence.Note = note ?? string.Empty;
+                _activeAbsence.Credited = credited;
                 State = TrackerState.PausedManual;
                 Persist(now);
             }
             else
             {
                 State = TrackerState.PausedManual;
-                StartActiveAbsence(now, type, note);
+                StartActiveAbsence(now, type, note, credited);
                 Persist(now);
             }
         }
 
         public void ResumeManual()
         {
-            if (State == TrackerState.Working)
+            if (State == TrackerState.Working && !PersonalUseMode)
             {
                 return;
             }
+
+            PersonalUseMode = false;
 
             DateTime now = _clock();
             string today = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -259,6 +304,12 @@ namespace RelogioAcompanhamento
 
         public void ToggleManualPause()
         {
+            if (PersonalUseMode)
+            {
+                ResumeManual();
+                return;
+            }
+
             if (State == TrackerState.Working)
             {
                 PauseManual(AbsenceTypes.PausaRapida, string.Empty);
@@ -289,26 +340,31 @@ namespace RelogioAcompanhamento
 
         public void AddManualAbsence(DateTime startTime, DateTime endTime, string type, string note)
         {
-            AddManualAbsence(startTime, endTime, type, note, false);
+            AddManualAbsence(startTime, endTime, type, note, AbsenceTypes.IsCreditedByDefault(type), true);
         }
 
-        public void AddManualAbsence(DateTime startTime, DateTime endTime, string type, string note, bool replaceOverlappingAuto)
+        public void AddManualAbsence(DateTime startTime, DateTime endTime, string type, string note, bool credited, bool overwriteOverlaps)
         {
             if (endTime <= startTime)
             {
                 return;
             }
 
-            if (replaceOverlappingAuto)
+            DateTime now = _clock();
+
+            if (overwriteOverlaps)
             {
-                List<int> overlapping = FindOverlappingAutoAbsenceIndices(startTime, endTime);
-                for (int i = overlapping.Count - 1; i >= 0; i--)
+                // 1) Sobrescreve bloqueios / pausas automáticas sobrepostas na aba Ausências
+                List<int> overlappingAbs = FindOverlappingAutoAbsenceIndices(startTime, endTime);
+                for (int i = overlappingAbs.Count - 1; i >= 0; i--)
                 {
-                    _completedAbsences.RemoveAt(overlapping[i]);
+                    _completedAbsences.RemoveAt(overlappingAbs[i]);
                 }
+
+                // 2) Sobrescreve / recorta sessões trabalhadas que caíram dentro do período da ausência
+                TrimWorkSessionsForAbsence(startTime, endTime, now);
             }
 
-            DateTime now = _clock();
             AbsenceRecord rec = new AbsenceRecord();
             rec.WorkDate = CurrentDate;
             rec.StartTime = startTime;
@@ -316,6 +372,7 @@ namespace RelogioAcompanhamento
             rec.DurationSeconds = Math.Max(1, (int)(endTime - startTime).TotalSeconds);
             rec.Type = string.IsNullOrEmpty(type) ? AbsenceTypes.Outro : type;
             rec.Note = note ?? string.Empty;
+            rec.Credited = credited;
             rec.IsActive = false;
 
             _completedAbsences.Add(rec);
@@ -324,10 +381,15 @@ namespace RelogioAcompanhamento
                 return a.StartTime.CompareTo(b.StartTime);
             });
 
-            PersistAbsencesAndDaily(now);
+            Persist(now);
         }
 
         public bool UpdateAbsence(int index, string newType, string newNote)
+        {
+            return UpdateAbsence(index, newType, newNote, AbsenceTypes.IsCreditedByDefault(newType));
+        }
+
+        public bool UpdateAbsence(int index, string newType, string newNote, bool credited)
         {
             if (index < 0 || index >= _completedAbsences.Count)
             {
@@ -336,6 +398,7 @@ namespace RelogioAcompanhamento
 
             _completedAbsences[index].Type = string.IsNullOrEmpty(newType) ? AbsenceTypes.Outro : newType;
             _completedAbsences[index].Note = newNote ?? string.Empty;
+            _completedAbsences[index].Credited = credited;
             PersistAbsencesAndDaily(_clock());
             return true;
         }
@@ -355,14 +418,13 @@ namespace RelogioAcompanhamento
         public void Shutdown(string reason)
         {
             DateTime now = _clock();
-            if (State == TrackerState.Working && _activeSession != null)
+            if (State == TrackerState.Working && _activeSession != null && !PersonalUseMode)
             {
                 CloseActiveSession(now, string.IsNullOrEmpty(reason) ? "Encerrado" : reason);
                 State = TrackerState.PausedSession;
             }
-            else if (_activeAbsence != null && State == TrackerState.PausedManual)
+            else if (_activeAbsence != null && State == TrackerState.PausedManual && !PersonalUseMode)
             {
-                // Fecha ausência manual em andamento ao sair do app
                 CloseActiveAbsence(now);
             }
             else
@@ -371,7 +433,10 @@ namespace RelogioAcompanhamento
             }
 
             InMeetingMode = false;
-            Persist(now);
+            if (!PersonalUseMode || _completedSessions.Count > 0 || _completedAbsences.Count > 0)
+            {
+                Persist(now);
+            }
         }
 
         public int GetTodayTotalSeconds()
@@ -386,7 +451,7 @@ namespace RelogioAcompanhamento
             {
                 total += s.DurationSeconds;
             }
-            if (State == TrackerState.Working && _activeSession != null)
+            if (State == TrackerState.Working && _activeSession != null && !PersonalUseMode)
             {
                 int current = (int)(now - _activeSession.StartTime).TotalSeconds;
                 if (current > 0)
@@ -436,6 +501,32 @@ namespace RelogioAcompanhamento
             return total;
         }
 
+        public int GetTodayCreditedAbsenceSeconds()
+        {
+            return GetTodayCreditedAbsenceSeconds(_clock());
+        }
+
+        public int GetTodayCreditedAbsenceSeconds(DateTime now)
+        {
+            int total = 0;
+            foreach (AbsenceRecord a in _completedAbsences)
+            {
+                if (a.Credited)
+                {
+                    total += a.DurationSeconds;
+                }
+            }
+            if (_activeAbsence != null && State != TrackerState.Working && _activeAbsence.Credited)
+            {
+                int current = (int)(now - _activeAbsence.StartTime).TotalSeconds;
+                if (current > 0)
+                {
+                    total += current;
+                }
+            }
+            return total;
+        }
+
         public AbsenceSummary GetTodayAbsenceSummary()
         {
             AbsenceSummary summary = new AbsenceSummary();
@@ -473,7 +564,7 @@ namespace RelogioAcompanhamento
             {
                 snapshot.Add(s.Clone());
             }
-            if (State == TrackerState.Working && _activeSession != null)
+            if (State == TrackerState.Working && _activeSession != null && !PersonalUseMode)
             {
                 WorkSession live = _activeSession.Clone();
                 live.EndTime = now;
@@ -553,9 +644,78 @@ namespace RelogioAcompanhamento
             return record;
         }
 
+        private void TrimWorkSessionsForAbsence(DateTime absStart, DateTime absEnd, DateTime now)
+        {
+            List<WorkSession> updated = new List<WorkSession>();
+            foreach (WorkSession s in _completedSessions)
+            {
+                if (s.EndTime <= absStart || s.StartTime >= absEnd)
+                {
+                    updated.Add(s);
+                    continue;
+                }
+
+                // Parte anterior à ausência
+                if (s.StartTime < absStart)
+                {
+                    int beforeDur = (int)(absStart - s.StartTime).TotalSeconds;
+                    if (beforeDur > 0)
+                    {
+                        WorkSession before = s.Clone();
+                        before.EndTime = absStart;
+                        before.DurationSeconds = beforeDur;
+                        updated.Add(before);
+                    }
+                }
+
+                // Parte posterior à ausência
+                if (s.EndTime > absEnd)
+                {
+                    int afterDur = (int)(s.EndTime - absEnd).TotalSeconds;
+                    if (afterDur > 0)
+                    {
+                        WorkSession after = s.Clone();
+                        after.StartTime = absEnd;
+                        after.DurationSeconds = afterDur;
+                        updated.Add(after);
+                    }
+                }
+            }
+
+            _completedSessions.Clear();
+            foreach (WorkSession s in updated)
+            {
+                _completedSessions.Add(s);
+            }
+
+            // Ajusta sessão ativa se o intervalo da ausência cobriu o início dela
+            if (State == TrackerState.Working && _activeSession != null && !PersonalUseMode)
+            {
+                if (_activeSession.StartTime < absEnd && now > absStart)
+                {
+                    if (_activeSession.StartTime < absStart)
+                    {
+                        WorkSession before = _activeSession.Clone();
+                        before.EndTime = absStart;
+                        before.DurationSeconds = Math.Max(0, (int)(absStart - before.StartTime).TotalSeconds);
+                        before.Reason = "AusenciaManual";
+                        if (before.DurationSeconds > 0)
+                        {
+                            _completedSessions.Add(before);
+                        }
+                    }
+
+                    DateTime newStart = absEnd > now ? now : absEnd;
+                    _activeSession.StartTime = newStart;
+                    _activeSession.EndTime = now;
+                    _activeSession.DurationSeconds = Math.Max(0, (int)(now - newStart).TotalSeconds);
+                }
+            }
+        }
+
         private void HandleDayRollover(DateTime now, string newDate)
         {
-            bool wasWorking = (State == TrackerState.Working && _activeSession != null);
+            bool wasWorking = (State == TrackerState.Working && _activeSession != null && !PersonalUseMode);
 
             if (wasWorking)
             {
@@ -636,7 +796,7 @@ namespace RelogioAcompanhamento
             _activeSession = null;
         }
 
-        private void StartActiveAbsence(DateTime startTime, string type, string note)
+        private void StartActiveAbsence(DateTime startTime, string type, string note, bool credited)
         {
             AbsenceRecord rec = new AbsenceRecord();
             rec.WorkDate = CurrentDate;
@@ -645,6 +805,7 @@ namespace RelogioAcompanhamento
             rec.DurationSeconds = 0;
             rec.Type = string.IsNullOrEmpty(type) ? AbsenceTypes.PausaRapida : type;
             rec.Note = note ?? string.Empty;
+            rec.Credited = credited;
             rec.IsActive = true;
             _activeAbsence = rec;
         }
@@ -697,14 +858,9 @@ namespace RelogioAcompanhamento
         private void Persist(DateTime now)
         {
             List<WorkSession> snapshot = GetTodaySessionsSnapshot();
-            if (snapshot.Count > 0)
-            {
-                _storage.SaveSessionsForDate(CurrentDate, snapshot);
-            }
-            if (_completedAbsences.Count > 0)
-            {
-                _storage.SaveAbsencesForDate(CurrentDate, _completedAbsences);
-            }
+            _storage.SaveSessionsForDate(CurrentDate, snapshot);
+            _storage.SaveAbsencesForDate(CurrentDate, _completedAbsences);
+
             if (snapshot.Count > 0 || _completedAbsences.Count > 0)
             {
                 DailyRecord daily = BuildDailyRecord(now);
