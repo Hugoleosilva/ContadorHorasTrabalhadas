@@ -558,7 +558,12 @@ namespace RelogioAcompanhamento
                 : "Sem extra";
             _lblTodayAbsences.Text = TimeFormat.FormatHms(today.TotalAbsenceSeconds);
 
-            if (_tracker.PersonalUseMode)
+            if (_tracker.WorkdayEnded)
+            {
+                _lblTodayStatus.Text = "Encerrada";
+                _lblTodayStatus.ForeColor = Color.FromArgb(129, 140, 248);
+            }
+            else if (_tracker.PersonalUseMode)
             {
                 _lblTodayStatus.Text = "Uso pessoal";
                 _lblTodayStatus.ForeColor = Color.FromArgb(129, 140, 248);
@@ -1002,6 +1007,7 @@ namespace RelogioAcompanhamento
                 case "Ativo": return "Em andamento";
                 case "EmReuniao": return "Em reunião (ativo)";
                 case "UsoPessoal": return "Troca para uso pessoal";
+                case "FimDeJornada": return "Jornada encerrada";
                 case "BloqueioTela": return "Bloqueio de tela";
                 case "Logoff": return "Logoff / Desconexão";
                 case "Suspensao": return "Suspensão / Hibernação";

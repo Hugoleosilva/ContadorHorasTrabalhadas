@@ -32,8 +32,9 @@ Aplicativo desktop ultraleve para Windows que acompanha as horas efetivamente tr
 
 ## Recursos
 
-- **Pergunta ao abrir (Trabalho vs. Uso Pessoal / Hobby / Curso)**:
+- **Pergunta ao abrir (Trabalho vs. Uso Pessoal) e Encerramento Claro de Jornada**:
   - Ao iniciar, o aplicativo pergunta se você está começando o expediente ou acessando para uso pessoal (estudos, hobby, curso, fim de semana). No **Modo Uso Pessoal**, nenhuma hora trabalhada ou ausência é gerada — e você pode alternar para trabalho a qualquer momento.
+  - No menu de clique direito há separação explícita entre **Encerrar Jornada de Trabalho...** (finaliza o expediente registrando *Jornada encerrada*, exibe o resumo/saldo BH do dia e permite continuar no PC em Uso Pessoal ou fechar o app) e **Fechar Aplicativo**.
 - **Contagem real e Modo Reunião**:
   - Congela automaticamente ao bloquear a tela (`Win + L` ou bloqueio automático do Windows), deslogar, suspender/hibernar ou desligar, e retoma ao voltar.
   - **Modo Reunião (não pausar no bloqueio)**: ao ativar no menu de clique direito, você pode bloquear a tela para ir a uma sala de reunião sem congelar a contagem e sem registrar ausência.

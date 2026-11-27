@@ -27,6 +27,7 @@ namespace RelogioAcompanhamento
         private ToolStripMenuItem _menuPauseResume;
         private ToolStripMenuItem _menuMeetingMode;
         private ToolStripMenuItem _menuPersonalMode;
+        private ToolStripMenuItem _menuEndWorkday;
         private ToolStripMenuItem _menuProfileClt;
         private ToolStripMenuItem _menuProfileEstagiario;
         private ToolStripMenuItem _menuAskModeOnStartup;
@@ -147,6 +148,10 @@ namespace RelogioAcompanhamento
             _menuPersonalMode.Checked = _tracker.PersonalUseMode;
             _menuPersonalMode.Click += delegate { TogglePersonalMode(); };
             menu.Items.Add(_menuPersonalMode);
+
+            _menuEndWorkday = new ToolStripMenuItem("Encerrar Jornada de Trabalho...");
+            _menuEndWorkday.Click += delegate { EndWorkdayFlow(); };
+            menu.Items.Add(_menuEndWorkday);
 
             menu.Items.Add(new ToolStripSeparator());
 
@@ -277,7 +282,7 @@ namespace RelogioAcompanhamento
 
             menu.Items.Add(new ToolStripSeparator());
 
-            ToolStripMenuItem menuExit = new ToolStripMenuItem("Sair");
+            ToolStripMenuItem menuExit = new ToolStripMenuItem("Fechar Aplicativo");
             menuExit.Click += delegate { ExitApplication("Encerrado"); };
             menu.Items.Add(menuExit);
 
@@ -405,6 +410,38 @@ namespace RelogioAcompanhamento
         {
             _tracker.SetPersonalUseMode(!_tracker.PersonalUseMode);
             UpdateUiAndAlerts();
+        }
+
+        private void EndWorkdayFlow()
+        {
+            DialogResult confirm = MessageBox.Show(
+                "Deseja encerrar sua jornada de trabalho de hoje?\n\nA contagem será finalizada e o aplicativo entrará em Modo Uso Pessoal (sem contar horas) ou poderá ser fechado.",
+                "Encerrar Jornada de Trabalho",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (confirm != DialogResult.Yes)
+            {
+                return;
+            }
+
+            _tracker.EndWorkday();
+            UpdateUiAndAlerts();
+
+            int worked = _tracker.GetTodayTotalSeconds();
+            int credited = _tracker.GetTodayCreditedAbsenceSeconds();
+            bool showBh = (_config.Profile == WorkProfile.Clt8h && HourBankCalculator.IsWeekday(DateTime.Today));
+            int delta = showBh
+                ? HourBankCalculator.CalculateDailyDeltaSeconds(worked, credited, HourBankCalculator.DailyTargetSeconds, HourBankCalculator.DailyToleranceSeconds)
+                : 0;
+
+            using (EndWorkdayDialogForm dlg = new EndWorkdayDialogForm(worked, credited, showBh, delta))
+            {
+                if (dlg.ShowDialog() == DialogResult.OK && dlg.CloseApplicationRequested)
+                {
+                    ExitApplication("FimDeJornada");
+                }
+            }
         }
 
         private void SwitchProfile(WorkProfile profile)
@@ -645,6 +682,7 @@ namespace RelogioAcompanhamento
                 level,
                 _tracker.InMeetingMode,
                 _tracker.PersonalUseMode,
+                _tracker.WorkdayEnded,
                 _tracker.ActiveAbsenceType);
 
             if (_tracker.State == TrackerState.Working && !_tracker.PersonalUseMode)
@@ -712,7 +750,8 @@ namespace RelogioAcompanhamento
         {
             int limitHours = Math.Max(1, _tracker.TotalLimitSeconds / 3600);
             string stateLabel;
-            if (_tracker.PersonalUseMode) stateLabel = "Uso pessoal";
+            if (_tracker.WorkdayEnded) stateLabel = "Jornada encerrada";
+            else if (_tracker.PersonalUseMode) stateLabel = "Uso pessoal";
             else if (_tracker.State == TrackerState.PausedManual)
             {
                 stateLabel = !string.IsNullOrEmpty(_tracker.ActiveAbsenceType)
@@ -777,7 +816,11 @@ namespace RelogioAcompanhamento
                 ? "Minimizar / Ocultar Relógio (Ctrl+Alt+R)"
                 : "Mostrar Relógio (Ctrl+Alt+R)";
 
-            if (_tracker.PersonalUseMode)
+            if (_tracker.WorkdayEnded)
+            {
+                _menuPauseResume.Text = "Retomar Trabalho";
+            }
+            else if (_tracker.PersonalUseMode)
             {
                 _menuPauseResume.Text = "Iniciar Trabalho";
             }
@@ -790,6 +833,7 @@ namespace RelogioAcompanhamento
 
             _menuMeetingMode.Checked = _tracker.InMeetingMode;
             _menuPersonalMode.Checked = _tracker.PersonalUseMode;
+            _menuEndWorkday.Enabled = !_tracker.WorkdayEnded;
         }
 
         private void ExitApplication(string reason)

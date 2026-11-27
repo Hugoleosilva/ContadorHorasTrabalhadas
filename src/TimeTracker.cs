@@ -22,6 +22,7 @@ namespace RelogioAcompanhamento
         public TrackerState State { get; private set; }
         public bool InMeetingMode { get; private set; }
         public bool PersonalUseMode { get; private set; }
+        public bool WorkdayEnded { get; private set; }
         public int RegularLimitSeconds { get { return _regularLimitSeconds; } }
         public int OvertimeLimitSeconds { get { return _overtimeLimitSeconds; } }
         public int TotalLimitSeconds { get { return _regularLimitSeconds + _overtimeLimitSeconds; } }
@@ -82,8 +83,32 @@ namespace RelogioAcompanhamento
             else
             {
                 PersonalUseMode = false;
+                WorkdayEnded = false;
                 ResumeManual();
             }
+        }
+
+        public void EndWorkday()
+        {
+            DateTime now = _clock();
+            if (State == TrackerState.Working && _activeSession != null && !PersonalUseMode)
+            {
+                CloseActiveSession(now, "FimDeJornada");
+            }
+            else if (_activeAbsence != null && State == TrackerState.PausedManual && !PersonalUseMode)
+            {
+                CloseActiveAbsence(now);
+            }
+            else
+            {
+                _activeAbsence = null;
+            }
+
+            InMeetingMode = false;
+            PersonalUseMode = true;
+            WorkdayEnded = true;
+            State = TrackerState.PausedManual;
+            Persist(now);
         }
 
         public void Initialize()
@@ -104,6 +129,7 @@ namespace RelogioAcompanhamento
             _completedAbsences.Clear();
             _activeAbsence = null;
             PersonalUseMode = startInPersonalMode;
+            WorkdayEnded = false;
 
             List<WorkSession> loaded = _storage.LoadSessionsForDate(CurrentDate);
             foreach (WorkSession s in loaded)
@@ -285,6 +311,7 @@ namespace RelogioAcompanhamento
             }
 
             PersonalUseMode = false;
+            WorkdayEnded = false;
 
             DateTime now = _clock();
             string today = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);

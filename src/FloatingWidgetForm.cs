@@ -21,6 +21,7 @@ namespace RelogioAcompanhamento
         private AlertLevel _alertLevel;
         private bool _inMeetingMode;
         private bool _personalUseMode;
+        private bool _workdayEnded;
         private string _activeAbsenceType;
         private bool _pulsePhase;
         private bool _isDemoMode;
@@ -125,6 +126,7 @@ namespace RelogioAcompanhamento
             AlertLevel alertLevel,
             bool inMeetingMode,
             bool personalUseMode,
+            bool workdayEnded,
             string activeAbsenceType)
         {
             _totalSeconds = totalSeconds;
@@ -134,6 +136,7 @@ namespace RelogioAcompanhamento
             _alertLevel = alertLevel;
             _inMeetingMode = inMeetingMode;
             _personalUseMode = personalUseMode;
+            _workdayEnded = workdayEnded;
             _activeAbsenceType = activeAbsenceType ?? string.Empty;
 
             if (alertLevel == AlertLevel.LimitReached && state == TrackerState.Working && !personalUseMode)
@@ -146,9 +149,11 @@ namespace RelogioAcompanhamento
             }
 
             string titlePrefix = _isDemoMode ? "[DEMO] " : string.Empty;
-            string modeTag = _personalUseMode
-                ? " [Uso Pessoal]"
-                : ((_inMeetingMode && _state == TrackerState.Working) ? " [Reunião]" : string.Empty);
+            string modeTag = _workdayEnded
+                ? " [Jornada encerrada]"
+                : (_personalUseMode
+                    ? " [Uso Pessoal]"
+                    : ((_inMeetingMode && _state == TrackerState.Working) ? " [Reunião]" : string.Empty));
             string nextTitle = string.Format("{0}{1}{2} — Relógio Acompanhamento", titlePrefix, TimeFormat.FormatHms(totalSeconds), modeTag);
             if (Text != nextTitle)
             {
@@ -592,6 +597,11 @@ namespace RelogioAcompanhamento
         private string GetStatusText()
         {
             string prefix = _isDemoMode ? "[DEMO] " : string.Empty;
+
+            if (_workdayEnded)
+            {
+                return prefix + "Encerrada";
+            }
 
             if (_personalUseMode)
             {

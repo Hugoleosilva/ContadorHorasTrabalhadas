@@ -29,6 +29,7 @@ namespace RelogioAcompanhamento.Tests
             Run("AlertaFadigaNoturnaEContextoSemanal", TestFatigueAndEnrichedPreAlert);
             Run("RadarPadroesColdStartMenosDe10Dias", TestRadarColdStart);
             Run("SimuladorFechamentoCicloCom12Dias", TestCycleSimulatorAndWeekdayRadar);
+            Run("EncerrarJornadaContinuaEmUsoPessoal", TestEndWorkdaySwitchesToPersonalUse);
 
             Console.WriteLine();
             Console.WriteLine(string.Format("Resultado: {0} passou(ram), {1} falhou(aram).", _passed, _failed));
@@ -692,6 +693,45 @@ namespace RelogioAcompanhamento.Tests
             AssertTrue(sim.WeekdayProfiles.Count == 5, "Deve gerar perfil dos 5 dias uteis (Seg-Sex)");
             AssertTrue(sim.BestCompensationDayName != "Segunda-feira" && sim.BestCompensationDayName != "Quarta-feira",
                 "Nao deve recomendar dias de pico de extra como melhor janela de compensacao");
+        }
+
+        private static void TestEndWorkdaySwitchesToPersonalUse()
+        {
+            string dir = CreateTempDir();
+            try
+            {
+                DateTime now = new DateTime(2026, 11, 27, 9, 0, 0);
+                CsvStorage storage = new CsvStorage(dir);
+                TimeTracker tracker = new TimeTracker(storage, 8 * 3600, 2 * 3600, delegate { return now; }, 30);
+
+                tracker.Initialize();
+                now = now.AddHours(8); // 17:00
+                tracker.EndWorkday();
+
+                AssertTrue(tracker.WorkdayEnded, "WorkdayEnded deve ficar true");
+                AssertTrue(tracker.PersonalUseMode, "Apos encerrar jornada deve entrar em PersonalUseMode");
+                AssertEqual(28800, tracker.GetTodayTotalSeconds(), "Deve preservar exatamente 8h trabalhadas");
+
+                List<WorkSession> sessions = tracker.GetTodaySessionsSnapshot();
+                AssertEqual("FimDeJornada", sessions[0].Reason, "Sessao encerrada deve registrar motivo FimDeJornada");
+
+                // Continua no PC por 2h + bloqueia tela -> nao soma trabalho nem ausencia!
+                now = now.AddHours(1);
+                tracker.PauseBySession("BloqueioTela");
+                now = now.AddHours(1);
+                tracker.ResumeFromSession();
+                AssertEqual(28800, tracker.GetTodayTotalSeconds(), "Tempo pessoal apos encerrar jornada nao deve somar trabalho");
+                AssertEqual(0, tracker.GetTodayAbsenceSeconds(), "Bloqueio apos encerrar jornada nao deve gerar ausencia");
+
+                // Se precisar retomar trabalho depois, limpa WorkdayEnded
+                tracker.ResumeManual();
+                AssertEqual(false, tracker.WorkdayEnded, "Retomar trabalho deve limpar WorkdayEnded");
+                AssertEqual(false, tracker.PersonalUseMode, "Retomar trabalho deve sair de PersonalUseMode");
+            }
+            finally
+            {
+                CleanupDir(dir);
+            }
         }
     }
 }
